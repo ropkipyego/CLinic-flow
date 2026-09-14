@@ -16,6 +16,8 @@ import {
   stockMovementSchema,
   upsertMedicine,
   listStockMovements,
+  otcSaleSchema,
+  sellOtc,
 } from "../services/pharmacyService.js";
 
 export const pharmacyRouter = Router();
@@ -77,6 +79,15 @@ pharmacyRouter.post(
       res,
       await dispensePrescription(req.user!.tenantId, req.user!.id, req.user!.role, param(req, "id"), body, req.ip),
     );
+  }),
+);
+
+pharmacyRouter.post(
+  "/otc",
+  authorize("ADMIN", "PHARMACY"),
+  asyncHandler(async (req, res) => {
+    const body = otcSaleSchema.parse(req.body);
+    return created(res, await sellOtc(req.user!.tenantId, req.user!.id, req.user!.role, body, req.ip));
   }),
 );
 

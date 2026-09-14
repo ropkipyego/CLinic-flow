@@ -1,12 +1,18 @@
 import type { Role } from "../auth/AuthContext";
 
 export const ROLE_LABEL: Record<Role, string> = {
-  ADMIN: "Administrator",
+  ADMIN: "Super Admin",
   RECEPTION: "Reception",
   DOCTOR: "Doctor",
   LAB: "Laboratory",
   PHARMACY: "Pharmacy",
   CASHIER: "Cashier",
+};
+
+export const VISIT_TYPE_LABEL: Record<string, string> = {
+  STANDARD: "Clinic visit",
+  WALK_IN_LAB: "Walk-in lab",
+  OTC_PHARMACY: "OTC pharmacy",
 };
 
 export function initials(first?: string, last?: string) {

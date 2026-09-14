@@ -25,7 +25,20 @@ const patientFields = {
 export const createPatientSchema = z.object(patientFields).refine(
   (v) => Boolean(v.dateOfBirth) || (v.ageYears !== undefined && v.ageYears !== null),
   { message: "Provide a date of birth or an age." },
-);
+).superRefine((v, ctx) => {
+  let age = v.ageYears ?? null;
+  if (v.dateOfBirth) {
+    const dob = new Date(v.dateOfBirth);
+    age = new Date().getFullYear() - dob.getFullYear();
+  }
+  if (age !== null && age < 18 && (!v.nextOfKin?.trim() || !v.nextOfKinPhone?.trim())) {
+    ctx.addIssue({
+      code: "custom",
+      message: "A child under 18 needs a parent or guardian name and phone.",
+      path: ["nextOfKin"],
+    });
+  }
+});
 
 export const updatePatientSchema = z.object({
   firstName: patientFields.firstName.optional(),

@@ -28,6 +28,15 @@ export function PatientFormPage() {
   }
 
   async function save(startVisit: boolean) {
+    const age = form.dateOfBirth
+      ? Math.floor((Date.now() - new Date(form.dateOfBirth).getTime()) / (365.25 * 24 * 3600 * 1000))
+      : form.ageYears
+        ? Number(form.ageYears)
+        : null;
+    if (age !== null && age < 18 && (!form.nextOfKin.trim() || !form.nextOfKinPhone.trim())) {
+      setError("A child under 18 needs a parent or guardian name and phone.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -85,8 +94,8 @@ export function PatientFormPage() {
         </Field>
         <Field label="Insurance provider"><input className={inputClass} value={form.insuranceProvider} onChange={(e) => set("insuranceProvider", e.target.value)} /></Field>
         <Field label="Address"><input className={inputClass} value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
-        <Field label="Next of kin"><input className={inputClass} value={form.nextOfKin} onChange={(e) => set("nextOfKin", e.target.value)} /></Field>
-        <Field label="Next of kin phone"><input className={inputClass} value={form.nextOfKinPhone} onChange={(e) => set("nextOfKinPhone", e.target.value)} /></Field>
+        <Field label="Next of kin"><input className={inputClass} value={form.nextOfKin} onChange={(e) => set("nextOfKin", e.target.value)} placeholder="Required if under 18" /></Field>
+        <Field label="Next of kin phone"><input className={inputClass} value={form.nextOfKinPhone} onChange={(e) => set("nextOfKinPhone", e.target.value)} placeholder="Guardian phone if under 18" /></Field>
       </div>
       <div className="flex gap-2">
         <Button type="submit" disabled={busy}>Save patient</Button>

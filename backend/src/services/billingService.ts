@@ -159,6 +159,7 @@ export async function encounterBilling(tenantId: string, encounterId: string) {
   return {
     encounterId: encounter.id,
     visitNumber: encounter.visitNumber,
+    visitType: encounter.visitType,
     status: encounter.status,
     patient: {
       id: encounter.patient.id,
@@ -194,6 +195,7 @@ export const receivePaymentSchema = z.object({
   amount: z.number().positive(),
   method: z.nativeEnum(PaymentMethod),
   reference: z.string().optional().nullable(),
+  clientRequestId: z.string().uuid().optional().nullable(),
 });
 
 export async function receivePayment(
@@ -203,7 +205,25 @@ export async function receivePayment(
   input: z.infer<typeof receivePaymentSchema>,
   ip?: string,
 ) {
+  if (input.clientRequestId) {
+    const existing = await prisma.payment.findFirst({
+      where: { tenantId, clientRequestId: input.clientRequestId },
+      include: { receipt: true },
+    });
+    if (existing) {
+      return { payment: existing, receipt: existing.receipt, replayed: true as const };
+    }
+  }
+
   return prisma.$transaction(async (tx) => {
+    if (input.clientRequestId) {
+      const raced = await tx.payment.findFirst({
+        where: { tenantId, clientRequestId: input.clientRequestId },
+        include: { receipt: true },
+      });
+      if (raced) return { payment: raced, receipt: raced.receipt, replayed: true as const };
+    }
+
     const encounter = await tx.encounter.findFirst({
       where: { id: encounterId, tenantId },
       include: {
@@ -265,6 +285,7 @@ export async function receivePayment(
         amount: new Prisma.Decimal(input.amount.toFixed(2)),
         method: input.method,
         reference: input.reference ?? null,
+        clientRequestId: input.clientRequestId ?? null,
         receivedById: actorId,
       },
     });
@@ -295,7 +316,7 @@ export async function receivePayment(
     );
 
     await refreshEncounterStatus(tx, tenantId, encounterId);
-    return { payment, receipt };
+    return { payment, receipt, replayed: false as const };
   });
 }
 
@@ -347,13 +368,18 @@ export async function getReceipt(tenantId: string, receiptId: string) {
 
 export async function cashierToday(tenantId: string, timezone = "Africa/Nairobi") {
   const { start, end } = dayRange(timezone);
-  const [pending, payments] = await Promise.all([
+  const [pending, todayVisits, payments] = await Promise.all([
     prisma.encounter.findMany({
       where: {
         tenantId,
-        status: { in: ["WAITING_PAYMENT", "WAITING_PHARMACY", "COMPLETED", "IN_CONSULTATION", "WAITING_LAB", "LAB_PROCESSING"] },
+        status: { not: "CANCELLED" },
         charges: { some: { status: { in: ["UNPAID", "PARTIALLY_PAID"] } } },
       },
+      include: { patient: true, charges: true },
+      orderBy: { startedAt: "asc" },
+    }),
+    prisma.encounter.findMany({
+      where: { tenantId, startedAt: { gte: start, lt: end }, status: { not: "CANCELLED" } },
       include: { patient: true, charges: true },
       orderBy: { startedAt: "asc" },
     }),
@@ -364,12 +390,13 @@ export async function cashierToday(tenantId: string, timezone = "Africa/Nairobi"
     }),
   ]);
 
-  const pendingRows = pending.map((e) => {
+  const toRow = (e: (typeof pending)[number]) => {
     const total = e.charges.reduce((s, c) => s + money(c.total), 0);
     const paid = e.charges.reduce((s, c) => s + money(c.amountPaid), 0);
     return {
       encounterId: e.id,
       visitNumber: e.visitNumber,
+      visitType: e.visitType,
       patientName: [e.patient.firstName, e.patient.lastName].join(" "),
       patientNumber: e.patient.patientNumber,
       total: Number(total.toFixed(2)),
@@ -377,10 +404,15 @@ export async function cashierToday(tenantId: string, timezone = "Africa/Nairobi"
       balance: Number((total - paid).toFixed(2)),
       status: e.status,
     };
-  });
+  };
+
+  const pendingRows = pending.map(toRow);
+  const pendingIds = new Set(pendingRows.map((row) => row.encounterId));
 
   return {
     pending: pendingRows,
+    today: todayVisits.map(toRow),
+    otherVisits: todayVisits.filter((e) => !pendingIds.has(e.id)).map(toRow),
     completed: payments.map((p) => ({
       id: p.id,
       encounterId: p.encounterId,

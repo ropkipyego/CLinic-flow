@@ -6,6 +6,7 @@ import { Alert, Button, Empty, PageHeader, Stat, StatusBadge, Table, cellClass }
 type Encounter = {
   id: string;
   visitNumber: string;
+  visitType?: string;
   status: string;
   startedAt: string;
   patient: { id: string; name: string; age: number | null; sex: string };
@@ -76,7 +77,7 @@ export function VisitsPage() {
       {rows.length === 0 ? (
         <Empty title="No patients registered today." body="Register a patient and start a visit." />
       ) : (
-        <Table headers={["Visit", "Patient", "Age/Sex", "Time", "Status", "Doctor", "Action"]}>
+        <Table headers={["Visit", "Patient", "Age/Sex", "Time", "Type", "Status", "Doctor", "Action"]}>
           {rows.map((e) => (
             <tr key={e.id} className="hover:bg-slate-50">
               <td className={`${cellClass} font-medium text-slate-900`}>{e.visitNumber}</td>
@@ -89,6 +90,7 @@ export function VisitsPage() {
                 {e.patient.age ?? "—"} / {e.patient.sex[0]}
               </td>
               <td className={cellClass}>{new Date(e.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+              <td className={cellClass}><StatusBadge status={e.visitType || "STANDARD"} /></td>
               <td className={cellClass}><StatusBadge status={e.status} /></td>
               <td className={cellClass}>{e.assignedDoctor?.name || "—"}</td>
               <td className={cellClass}>

@@ -17,6 +17,8 @@ import {
   saveLabResult,
   updateLabOrderStatus,
   upsertLabTest,
+  walkInLabSchema,
+  createWalkInLabOrder,
 } from "../services/labService.js";
 
 export const labRouter = Router();
@@ -24,7 +26,7 @@ labRouter.use(authenticate);
 
 labRouter.get(
   "/tests",
-  authorize("ADMIN", "DOCTOR", "LAB"),
+  authorize("ADMIN", "DOCTOR", "LAB", "RECEPTION"),
   asyncHandler(async (req, res) => ok(res, await listLabTests(req.user!.tenantId, req.query.active === "true"))),
 );
 
@@ -61,6 +63,15 @@ labRouter.post(
   asyncHandler(async (req, res) => {
     const body = createLabOrderSchema.parse(req.body);
     return created(res, await createLabOrder(req.user!.tenantId, req.user!.id, param(req, "encounterId"), body, req.ip));
+  }),
+);
+
+labRouter.post(
+  "/walk-in",
+  authorize("ADMIN", "LAB", "RECEPTION"),
+  asyncHandler(async (req, res) => {
+    const body = walkInLabSchema.parse(req.body);
+    return created(res, await createWalkInLabOrder(req.user!.tenantId, req.user!.id, body, req.ip));
   }),
 );
 

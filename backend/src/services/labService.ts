@@ -6,6 +6,7 @@ import { badRequest, notFound } from "../lib/errors.js";
 import { money, toNumber } from "../lib/serialize.js";
 import { createChargeInTx } from "./billingService.js";
 import { refreshEncounterStatus } from "./encounterService.js";
+import { createWalkInEncounter, findOrCreateWalkInPatient, walkInClientSchema } from "./walkInService.js";
 
 export const labTestSchema = z.object({
   name: z.string().min(1),
@@ -166,6 +167,104 @@ export async function createLabOrder(
       where: { id: order.id },
       include: { items: { include: { labTest: true } }, patient: true, encounter: true },
     });
+  });
+}
+
+export const walkInLabSchema = z.object({
+  client: walkInClientSchema,
+  labTestIds: z.array(z.string().uuid()).min(1, "Select at least one test."),
+  notes: z.string().optional().nullable(),
+  clientRequestId: z.string().uuid().optional().nullable(),
+});
+
+export async function createWalkInLabOrder(
+  tenantId: string,
+  actorId: string,
+  input: z.infer<typeof walkInLabSchema>,
+  ip?: string,
+) {
+  const tests = await prisma.labTest.findMany({
+    where: { tenantId, id: { in: input.labTestIds }, active: true },
+  });
+  if (tests.length !== input.labTestIds.length) {
+    throw badRequest("One or more laboratory tests are invalid or inactive.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const patient = await findOrCreateWalkInPatient(tx, tenantId, actorId, input.client);
+    const encounter = await createWalkInEncounter(
+      tx,
+      tenantId,
+      actorId,
+      patient.id,
+      "WALK_IN_LAB",
+      input.notes ?? "Walk-in laboratory",
+      input.clientRequestId,
+    );
+    const existingOrders = ("labOrders" in encounter && Array.isArray(encounter.labOrders) ? encounter.labOrders : []) as Array<{ id: string }>;
+    if (existingOrders.length) {
+      const created = await tx.labOrder.findFirst({
+        where: { id: existingOrders[0].id },
+        include: { items: { include: { labTest: true } }, patient: true, encounter: true },
+      });
+      return { ...created, consultationCharged: false, visitType: "WALK_IN_LAB", replayed: true };
+    }
+
+    const order = await tx.labOrder.create({
+      data: {
+        tenantId,
+        encounterId: encounter.id,
+        patientId: patient.id,
+        orderedById: actorId,
+        notes: input.notes ?? "Walk-in test — no consultation charge",
+        status: "REQUESTED",
+      },
+    });
+
+    for (const test of tests) {
+      const charge = await createChargeInTx(tx, {
+        tenantId,
+        encounterId: encounter.id,
+        patientId: patient.id,
+        serviceId: test.serviceId,
+        source: "LABORATORY",
+        description: test.name,
+        quantity: 1,
+        unitPrice: money(test.price),
+      });
+      await tx.labOrderItem.create({
+        data: {
+          tenantId,
+          labOrderId: order.id,
+          labTestId: test.id,
+          chargeId: charge.id,
+        },
+      });
+    }
+
+    await writeAudit(
+      {
+        tenantId,
+        userId: actorId,
+        action: "lab.walk_in_created",
+        entity: "lab_order",
+        entityId: order.id,
+        metadata: { visitNumber: encounter.visitNumber, tests: tests.map((t) => t.code) },
+        ipAddress: ip,
+      },
+      tx,
+    );
+    await refreshEncounterStatus(tx, tenantId, encounter.id);
+
+    const created = await tx.labOrder.findFirst({
+      where: { id: order.id },
+      include: { items: { include: { labTest: true } }, patient: true, encounter: true },
+    });
+    return {
+      ...created,
+      consultationCharged: false,
+      visitType: "WALK_IN_LAB",
+    };
   });
 }
 

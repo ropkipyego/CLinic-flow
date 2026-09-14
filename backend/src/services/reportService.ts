@@ -21,6 +21,7 @@ export async function dailyVisits(tenantId: string, from?: string, to?: string) 
   });
   return encounters.map((e) => ({
     visitNumber: e.visitNumber,
+    visitType: e.visitType,
     patientNumber: e.patient.patientNumber,
     patient: `${e.patient.firstName} ${e.patient.lastName}`,
     status: e.status,
@@ -125,10 +126,12 @@ export async function encounterSummary(tenantId: string, from?: string, to?: str
     where: { tenantId, startedAt: { gte: start, lt: end } },
   });
   const byStatus: Record<string, number> = {};
+  const byType: Record<string, number> = {};
   for (const e of encounters) {
     byStatus[e.status] = (byStatus[e.status] || 0) + 1;
+    byType[e.visitType] = (byType[e.visitType] || 0) + 1;
   }
-  return { total: encounters.length, byStatus };
+  return { total: encounters.length, byStatus, byVisitType: byType };
 }
 
 export function toCsv(rows: Array<Record<string, unknown>>): string {

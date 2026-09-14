@@ -20,7 +20,11 @@ Copy `.env.example` to the environment file you need. Development defaults keep 
 5. `npm run dev`
 6. In another terminal: `cd frontend && npm install && npm run dev`
 
-Demo login: `admin@demo.clinic` / `Password123!` (also reception, doctor, lab, pharmacy, cashier).
+Demo login: Super Admin `admin@demo.clinic` / `Password123!` (also reception, doctor, lab, pharmacy, cashier for local demo).
+
+On a live clinic, create **only the Super Admin**, then that account creates staff from Administration. Do not seed production.
+
+Walk-in lab and OTC pharmacy skip the consultation fee. Cashier collects any unpaid visit, including those. A child under 18 needs a guardian name and phone.
 
 ## Migrations
 

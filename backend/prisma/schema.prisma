@@ -28,6 +28,12 @@ enum EncounterStatus {
   CANCELLED
 }
 
+enum VisitType {
+  STANDARD
+  WALK_IN_LAB
+  OTC_PHARMACY
+}
+
 enum Sex {
   MALE
   FEMALE
@@ -253,12 +259,14 @@ model Encounter {
   tenantId         String
   patientId        String
   visitNumber      String
+  visitType        VisitType       @default(STANDARD)
   status           EncounterStatus @default(REGISTERED)
   assignedDoctorId String?
   createdById      String
   startedAt        DateTime        @default(now())
   completedAt      DateTime?
   notes            String?
+  clientRequestId  String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -278,9 +286,11 @@ model Encounter {
   receipts      Receipt[]
 
   @@unique([tenantId, visitNumber])
+  @@unique([tenantId, clientRequestId])
   @@index([tenantId])
   @@index([tenantId, startedAt])
   @@index([tenantId, status])
+  @@index([tenantId, visitType])
   @@index([tenantId, patientId])
 }
 
@@ -627,10 +637,11 @@ model Payment {
   encounterId  String
   receiptId    String
   amount       Decimal       @db.Decimal(12, 2)
-  method       PaymentMethod
-  reference    String?
-  receivedById String
-  createdAt    DateTime      @default(now())
+  method           PaymentMethod
+  reference        String?
+  clientRequestId  String?
+  receivedById     String
+  createdAt        DateTime      @default(now())
 
   tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   patient    Patient   @relation(fields: [patientId], references: [id], onDelete: Restrict)
@@ -638,6 +649,7 @@ model Payment {
   receipt    Receipt   @relation(fields: [receiptId], references: [id], onDelete: Restrict)
   receivedBy User      @relation(fields: [receivedById], references: [id])
 
+  @@unique([tenantId, clientRequestId])
   @@index([tenantId])
   @@index([tenantId, createdAt])
   @@index([tenantId, encounterId])

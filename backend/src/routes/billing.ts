@@ -79,7 +79,9 @@ paymentsRouter.post(
   "/encounters/:encounterId",
   asyncHandler(async (req, res) => {
     const body = receivePaymentSchema.parse(req.body);
-    return created(res, await receivePayment(req.user!.tenantId, req.user!.id, param(req, "encounterId"), body, req.ip));
+    const result = await receivePayment(req.user!.tenantId, req.user!.id, param(req, "encounterId"), body, req.ip);
+    if (result.replayed) return ok(res, result);
+    return created(res, result);
   }),
 );
 

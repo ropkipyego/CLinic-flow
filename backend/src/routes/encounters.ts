@@ -16,6 +16,7 @@ import {
   todayStats,
   updateEncounterStatus,
 } from "../services/encounterService.js";
+import { operationalDashboard } from "../services/dashboardService.js";
 import { getConsultationBundle } from "../services/consultationService.js";
 
 export const encountersRouter = Router();
@@ -30,6 +31,11 @@ encountersRouter.get(
 encountersRouter.get(
   "/stats/today",
   asyncHandler(async (req, res) => ok(res, await todayStats(req.user!.tenantId))),
+);
+
+encountersRouter.get(
+  "/stats/dashboard",
+  asyncHandler(async (req, res) => ok(res, await operationalDashboard(req.user!.tenantId))),
 );
 
 encountersRouter.get(

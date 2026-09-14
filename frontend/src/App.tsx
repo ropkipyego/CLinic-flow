@@ -47,7 +47,7 @@ export function App() {
         <Route path="/visits" element={<Guard roles={["RECEPTION", "DOCTOR"]}><VisitsPage /></Guard>} />
         <Route path="/consultation" element={<Guard roles={["DOCTOR"]}><ConsultationPage /></Guard>} />
         <Route path="/consultation/:encounterId" element={<Guard roles={["DOCTOR"]}><ConsultationPage /></Guard>} />
-        <Route path="/laboratory" element={<Guard roles={["LAB", "DOCTOR"]}><LabPage /></Guard>} />
+        <Route path="/laboratory" element={<Guard roles={["LAB", "DOCTOR", "RECEPTION"]}><LabPage /></Guard>} />
         <Route path="/pharmacy" element={<Guard roles={["PHARMACY"]}><PharmacyPage /></Guard>} />
         <Route path="/cashier" element={<Guard roles={["CASHIER"]}><CashierPage /></Guard>} />
         <Route path="/cashier/receipts/:id" element={<Guard roles={["CASHIER"]}><ReceiptPage /></Guard>} />

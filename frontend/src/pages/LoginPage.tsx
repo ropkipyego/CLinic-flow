@@ -67,6 +67,7 @@ export function LoginPage() {
           <Button type="submit" disabled={busy}>
             {busy ? "Signing in…" : "Sign in"}
           </Button>
+          <p className="text-xs text-slate-500">Accounts are issued by the clinic Super Admin.</p>
           <Link className="block text-sm text-slate-500 hover:text-slate-800" to="/reset-password">
             Forgot password
           </Link>

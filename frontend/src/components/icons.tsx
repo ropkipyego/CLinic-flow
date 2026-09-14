@@ -51,4 +51,46 @@ export const Icons = {
   logout: (p: IconProps) => (
     <Svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></Svg>
   ),
+  plus: (p: IconProps) => (
+    <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>
+  ),
+  check: (p: IconProps) => (
+    <Svg {...p}><path d="M20 6L9 17l-5-5" /></Svg>
+  ),
+  cash: (p: IconProps) => (
+    <Svg {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></Svg>
+  ),
+  pill: (p: IconProps) => (
+    <Svg {...p}><rect x="3.5" y="8" width="17" height="8" rx="4" transform="rotate(-35 12 12)" /><path d="M9 9.5l6 5" /></Svg>
+  ),
+  flask: (p: IconProps) => (
+    <Svg {...p}><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4A2 2 0 0 0 19 18l-5-9V3" /></Svg>
+  ),
+  userPlus: (p: IconProps) => (
+    <Svg {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M22 11h-6" /></Svg>
+  ),
+  sync: (p: IconProps) => (
+    <Svg {...p}><path d="M21 12a9 9 0 0 0-15.5-6.4L3 8" /><path d="M3 3v5h5" /><path d="M3 12a9 9 0 0 0 15.5 6.4L21 16" /><path d="M21 21v-5h-5" /></Svg>
+  ),
+  offline: (p: IconProps) => (
+    <Svg {...p}><path d="M1 1l22 22" /><path d="M16.7 16.7A8 8 0 0 1 5.3 5.3" /><path d="M8.5 8.5a5 5 0 0 0 7 7" /><path d="M12 20h.01" /></Svg>
+  ),
+  sort: (p: IconProps) => (
+    <Svg {...p}><path d="M8 5v14M5 8l3-3 3 3M16 19V5M13 16l3 3 3-3" /></Svg>
+  ),
+  print: (p: IconProps) => (
+    <Svg {...p}><path d="M6 9V3h12v6" /><rect x="6" y="13" width="12" height="8" /><path d="M6 17H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" /></Svg>
+  ),
+  mail: (p: IconProps) => (
+    <Svg {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></Svg>
+  ),
+  warning: (p: IconProps) => (
+    <Svg {...p}><path d="M12 3l10 18H2L12 3z" /><path d="M12 9v5M12 17h.01" /></Svg>
+  ),
+  refresh: (p: IconProps) => (
+    <Svg {...p}><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 4v6h-6" /></Svg>
+  ),
+  child: (p: IconProps) => (
+    <Svg {...p}><circle cx="12" cy="7" r="3" /><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" /></Svg>
+  ),
 };

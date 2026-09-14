@@ -6,6 +6,7 @@ import { badRequest, forbidden, notFound } from "../lib/errors.js";
 import { money } from "../lib/serialize.js";
 import { createChargeInTx } from "./billingService.js";
 import { refreshEncounterStatus } from "./encounterService.js";
+import { createWalkInEncounter, findOrCreateWalkInPatient, walkInClientSchema } from "./walkInService.js";
 
 export const medicineSchema = z.object({
   name: z.string().min(1),
@@ -401,5 +402,186 @@ export async function listStockMovements(tenantId: string, medicineId?: string) 
     include: { medicine: true, user: true },
     orderBy: { createdAt: "desc" },
     take: 200,
+  });
+}
+
+export const otcSaleSchema = z.object({
+  client: walkInClientSchema,
+  items: z
+    .array(
+      z.object({
+        medicineId: z.string().uuid(),
+        quantity: z.number().int().positive(),
+      }),
+    )
+    .min(1, "Add at least one medicine."),
+  notes: z.string().optional().nullable(),
+  clientRequestId: z.string().uuid().optional().nullable(),
+});
+
+export async function sellOtc(
+  tenantId: string,
+  actorId: string,
+  role: string,
+  input: z.infer<typeof otcSaleSchema>,
+  ip?: string,
+) {
+  const uniqueIds = [...new Set(input.items.map((item) => item.medicineId))];
+  const medicines = await prisma.medicine.findMany({
+    where: { tenantId, id: { in: uniqueIds }, active: true },
+  });
+  if (medicines.length !== uniqueIds.length) {
+    throw badRequest("One or more medicines are invalid or inactive.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const patient = await findOrCreateWalkInPatient(tx, tenantId, actorId, input.client);
+    const encounter = await createWalkInEncounter(
+      tx,
+      tenantId,
+      actorId,
+      patient.id,
+      "OTC_PHARMACY",
+      input.notes ?? "Over-the-counter sale",
+      input.clientRequestId,
+    );
+    const existingCharges = "charges" in encounter && Array.isArray(encounter.charges) ? encounter.charges : [];
+    if (existingCharges.length) {
+      const total = existingCharges.reduce((sum: number, charge: { total: unknown }) => sum + money(charge.total as never), 0);
+      return {
+        encounterId: encounter.id,
+        visitNumber: encounter.visitNumber,
+        visitType: encounter.visitType,
+        status: encounter.status,
+        replayed: true,
+        patient: {
+          id: patient.id,
+          name: `${patient.firstName} ${patient.lastName}`,
+          patientNumber: patient.patientNumber,
+          phone: patient.phone,
+          age: patient.ageYears,
+        },
+        items: [],
+        total: Number(total.toFixed(2)),
+      };
+    }
+
+    const merged = new Map<string, number>();
+    for (const item of input.items) {
+      merged.set(item.medicineId, (merged.get(item.medicineId) || 0) + item.quantity);
+    }
+    const saleItems = [...merged.entries()].map(([medicineId, quantity]) => ({ medicineId, quantity }));
+
+    const prescription = await tx.prescription.create({
+      data: {
+        tenantId,
+        encounterId: encounter.id,
+        patientId: patient.id,
+        doctorId: actorId,
+        notes: input.notes ?? "OTC sale",
+        status: "DISPENSED",
+        items: {
+          create: saleItems.map((item) => {
+            const medicine = medicines.find((m) => m.id === item.medicineId)!;
+            return {
+              tenantId,
+              medicineId: item.medicineId,
+              dose: "OTC",
+              frequency: "as directed",
+              duration: "OTC",
+              quantity: item.quantity,
+              dispensedQty: item.quantity,
+              instructions: `${medicine.name} over-the-counter`,
+            };
+          }),
+        },
+      },
+      include: { items: { include: { medicine: true } } },
+    });
+
+    const dispense = await tx.dispense.create({
+      data: {
+        tenantId,
+        prescriptionId: prescription.id,
+        encounterId: encounter.id,
+        patientId: patient.id,
+        pharmacistId: actorId,
+      },
+    });
+
+    const charges = [];
+    for (const item of saleItems) {
+      const rxItem = prescription.items.find((row) => row.medicineId === item.medicineId);
+      if (!rxItem) throw badRequest("OTC item could not be recorded.");
+      const medicine = medicines.find((m) => m.id === item.medicineId)!;
+      await moveStock(tx, {
+        tenantId,
+        medicineId: item.medicineId,
+        userId: actorId,
+        type: "DISPENSE",
+        quantity: item.quantity,
+        signedDelta: -item.quantity,
+        reference: encounter.visitNumber,
+        notes: `OTC ${medicine.name}`,
+        allowNegative: role === "ADMIN",
+      });
+      const charge = await createChargeInTx(tx, {
+        tenantId,
+        encounterId: encounter.id,
+        patientId: patient.id,
+        medicineId: item.medicineId,
+        source: "PHARMACY",
+        description: `${medicine.name}${medicine.strength ? ` ${medicine.strength}` : ""}`,
+        quantity: item.quantity,
+        unitPrice: money(medicine.sellingPrice),
+      });
+      charges.push(charge);
+      await tx.dispenseItem.create({
+        data: {
+          tenantId,
+          dispenseId: dispense.id,
+          prescriptionItemId: rxItem.id,
+          medicineId: item.medicineId,
+          quantity: item.quantity,
+          chargeId: charge.id,
+        },
+      });
+    }
+
+    await writeAudit(
+      {
+        tenantId,
+        userId: actorId,
+        action: "pharmacy.otc_sold",
+        entity: "encounter",
+        entityId: encounter.id,
+        metadata: { visitNumber: encounter.visitNumber, items: input.items.length },
+        ipAddress: ip,
+      },
+      tx,
+    );
+    await refreshEncounterStatus(tx, tenantId, encounter.id);
+
+    const total = charges.reduce((sum, charge) => sum + money(charge.total), 0);
+    return {
+      encounterId: encounter.id,
+      visitNumber: encounter.visitNumber,
+      visitType: encounter.visitType,
+      status: "WAITING_PAYMENT",
+      patient: {
+        id: patient.id,
+        name: `${patient.firstName} ${patient.lastName}`,
+        patientNumber: patient.patientNumber,
+        phone: patient.phone,
+        age: patient.ageYears,
+      },
+      items: prescription.items.map((item) => ({
+        medicine: item.medicine.name,
+        quantity: item.quantity,
+        unitPrice: money(item.medicine.sellingPrice),
+        total: Number((money(item.medicine.sellingPrice) * item.quantity).toFixed(2)),
+      })),
+      total: Number(total.toFixed(2)),
+    };
   });
 }

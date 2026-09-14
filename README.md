@@ -46,7 +46,7 @@ Password for all seed users: `Password123!`
 
 | Role | Email |
 | --- | --- |
-| Admin | admin@demo.clinic |
+| Super Admin | admin@demo.clinic |
 | Reception | reception@demo.clinic |
 | Doctor | doctor@demo.clinic |
 | Lab | lab@demo.clinic |
@@ -55,6 +55,16 @@ Password for all seed users: `Password123!`
 
 Seed data never runs automatically in production.
 
+### Go-live
+
+Production starts with **one Super Admin** (`ADMIN`). That account creates every other staff user (reception, doctor, lab, pharmacy, cashier) from Administration. Staff emails should use the clinic domain so they stay consistent.
+
+Walk-in laboratory tests and over-the-counter pharmacy sales do **not** add a consultation fee. A child under 18 needs a parent or guardian name and phone.
+
+The cashier queue shows every unpaid visit, including walk-ins and OTC. Payments are idempotent, so a retried or offline-synced collection cannot double-charge.
+
+Offline: if the network drops, the browser saves mutating work locally and syncs it when the clinic is back online. UI filters and selected visits are remembered on the same computer.
+
 ## Tests
 
 ```bash
@@ -62,7 +72,7 @@ cd backend
 DATABASE_URL=postgresql://clinicflow:clinicflow@localhost:5432/clinicflow npm test
 ```
 
-Critical workflow coverage: registration, encounter, consultation, lab order/result, prescription, dispense + stock deduction, charges, payment, receipt, tenant isolation, and role authorization.
+Critical workflow coverage: registration, encounter, consultation, lab order/result, prescription, dispense + stock deduction, charges, payment, receipt, walk-in lab (no consult fee), OTC pharmacy (minors need a guardian), payment idempotency, tenant isolation, and role authorization.
 
 ## Environments
 

@@ -214,8 +214,92 @@ describe("ClinicFlow critical workflow", () => {
     const usersOk = await request(app).get("/api/v1/users").set(auth(adminA));
     expect(usersOk.status).toBe(200);
     expect(usersOk.body.data.length).toBe(6);
+    expect(usersOk.body.data.some((u: { role: string; isSuperAdmin: boolean }) => u.role === "ADMIN" && u.isSuperAdmin)).toBe(true);
 
     void tenantA;
     void tenantB;
+  });
+
+  it("creates a walk-in lab visit without a consultation charge", async () => {
+    const created = await request(app)
+      .post("/api/v1/lab/walk-in")
+      .set(auth(lab))
+      .send({
+        client: { name: "Walk In Lab", phone: "0711888001", ageYears: 24 },
+        labTestIds: [malariaId],
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.data.consultationCharged).toBe(false);
+    const encounterId = created.body.data.encounter.id as string;
+    const itemId = created.body.data.items[0].id as string;
+
+    const billing = await request(app).get(`/api/v1/payments/encounters/${encounterId}`).set(auth(cashier));
+    expect(billing.body.data.charges.every((c: { source: string }) => c.source !== "CONSULTATION")).toBe(true);
+    expect(billing.body.data.charges.some((c: { source: string }) => c.source === "LABORATORY")).toBe(true);
+
+    const cashierDash = await request(app).get("/api/v1/payments/today").set(auth(cashier));
+    expect(cashierDash.body.data.pending.some((p: { encounterId: string }) => p.encounterId === encounterId)).toBe(true);
+
+    await request(app).post(`/api/v1/lab/results/items/${itemId}`).set(auth(lab)).send({ valueText: "Negative" });
+
+    const afterLab = await request(app).get(`/api/v1/payments/encounters/${encounterId}`).set(auth(cashier));
+    const pay = await request(app)
+      .post(`/api/v1/payments/encounters/${encounterId}`)
+      .set(auth(cashier))
+      .send({ amount: afterLab.body.data.balance, method: "CASH", clientRequestId: "11111111-1111-4111-8111-111111111111" });
+    expect(pay.status).toBe(201);
+
+    const replay = await request(app)
+      .post(`/api/v1/payments/encounters/${encounterId}`)
+      .set(auth(cashier))
+      .send({ amount: afterLab.body.data.balance, method: "CASH", clientRequestId: "11111111-1111-4111-8111-111111111111" });
+    expect(replay.body.data.replayed).toBe(true);
+    expect(replay.body.data.receipt.id).toBe(pay.body.data.receipt.id);
+
+    const done = await request(app).get(`/api/v1/encounters/${encounterId}`).set(auth(reception));
+    expect(done.body.data.status).toBe("COMPLETED");
+    expect(done.body.data.visitType).toBe("WALK_IN_LAB");
+  });
+
+  it("sells OTC pharmacy with name and phone, and requires a guardian for a child", async () => {
+    const blocked = await request(app)
+      .post("/api/v1/pharmacy/otc")
+      .set(auth(pharmacy))
+      .send({
+        client: { name: "Baby Otieno", phone: "0711888002", ageYears: 4 },
+        items: [{ medicineId: paraId, quantity: 2 }],
+      });
+    expect(blocked.status).toBe(400);
+
+    const beforeStock = await prisma.medicine.findFirst({ where: { id: paraId } });
+    const sold = await request(app)
+      .post("/api/v1/pharmacy/otc")
+      .set(auth(pharmacy))
+      .send({
+        client: {
+          name: "Baby Otieno",
+          phone: "0711888002",
+          ageYears: 4,
+          guardianName: "Mary Otieno",
+          guardianPhone: "0711888003",
+        },
+        items: [{ medicineId: paraId, quantity: 2 }],
+      });
+    expect(sold.status).toBe(201);
+    expect(sold.body.data.visitType).toBe("OTC_PHARMACY");
+    const afterStock = await prisma.medicine.findFirst({ where: { id: paraId } });
+    expect(afterStock!.quantityOnHand).toBe(beforeStock!.quantityOnHand - 2);
+
+    const encounterId = sold.body.data.encounterId as string;
+    const billing = await request(app).get(`/api/v1/payments/encounters/${encounterId}`).set(auth(cashier));
+    expect(billing.body.data.charges.every((c: { source: string }) => c.source === "PHARMACY")).toBe(true);
+
+    const pay = await request(app)
+      .post(`/api/v1/payments/encounters/${encounterId}`)
+      .set(auth(cashier))
+      .send({ amount: billing.body.data.balance, method: "CASH" });
+    expect(pay.status).toBe(201);
+    const done = await request(app).get(`/api/v1/encounters/${encounterId}`).set(auth(reception));
+    expect(done.body.data.status).toBe("COMPLETED");
   });
 });

@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth, type Role } from "../auth/AuthContext";
 import { Icons } from "../components/icons";
 import { ClinicLogo } from "../branding/ClinicLogo";
+import { SyncBanner } from "../offline/SyncBanner";
 import { initials, ROLE_LABEL } from "../lib/labels";
 
 type NavItem = {
@@ -20,7 +21,7 @@ const CARE: NavItem[] = [
 ];
 
 const OPERATIONS: NavItem[] = [
-  { to: "/laboratory", label: "Laboratory", roles: ["ADMIN", "LAB", "DOCTOR"], icon: "lab" },
+  { to: "/laboratory", label: "Laboratory", roles: ["ADMIN", "LAB", "DOCTOR", "RECEPTION"], icon: "lab" },
   { to: "/pharmacy", label: "Pharmacy", roles: ["ADMIN", "PHARMACY"], icon: "pharmacy" },
   { to: "/cashier", label: "Cashier", roles: ["ADMIN", "CASHIER"], icon: "cashier" },
 ];
@@ -173,6 +174,7 @@ export function AppLayout() {
           </div>
         </div>
         <main className="mx-auto max-w-6xl p-4 md:p-8">
+          <SyncBanner />
           <Outlet />
         </main>
       </div>

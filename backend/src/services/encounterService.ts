@@ -1,4 +1,4 @@
-import { EncounterStatus } from "@prisma/client";
+import { EncounterStatus, VisitType } from "@prisma/client";
 import { z } from "zod";
 import { prisma, type TxClient } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
@@ -11,6 +11,7 @@ export const createEncounterSchema = z.object({
   assignedDoctorId: z.string().uuid().optional().nullable(),
   notes: z.string().optional().nullable(),
   checkInToConsultation: z.boolean().optional(),
+  visitType: z.nativeEnum(VisitType).optional(),
 });
 
 const patientSelect = {
@@ -28,6 +29,7 @@ const patientSelect = {
 export function serializeEncounter(encounter: {
   id: string;
   visitNumber: string;
+  visitType?: VisitType;
   status: EncounterStatus;
   assignedDoctorId: string | null;
   createdById: string;
@@ -46,16 +48,21 @@ export function serializeEncounter(encounter: {
     ageYears: number | null;
   };
   assignedDoctor?: { id: string; firstName: string; lastName: string } | null;
+  unpaidBalance?: number;
+  chargeTotal?: number;
 }) {
   return {
     id: encounter.id,
     visitNumber: encounter.visitNumber,
+    visitType: encounter.visitType ?? "STANDARD",
     status: encounter.status,
     assignedDoctorId: encounter.assignedDoctorId,
     createdById: encounter.createdById,
     startedAt: encounter.startedAt,
     completedAt: encounter.completedAt,
     notes: encounter.notes,
+    unpaidBalance: encounter.unpaidBalance ?? 0,
+    chargeTotal: encounter.chargeTotal ?? 0,
     patient: {
       ...encounter.patient,
       name: displayName(encounter.patient),
@@ -96,6 +103,7 @@ export async function createEncounter(
         createdById: actorId,
         assignedDoctorId: input.assignedDoctorId ?? null,
         notes: input.notes ?? null,
+        visitType: input.visitType ?? "STANDARD",
         status: input.checkInToConsultation ? "WAITING_CONSULTATION" : "REGISTERED",
       },
       include: { patient: { select: patientSelect }, assignedDoctor: true },
@@ -130,10 +138,27 @@ export async function listTodayEncounters(tenantId: string, timezone = "Africa/N
   const { start, end } = todayRange(timezone);
   const encounters = await prisma.encounter.findMany({
     where: { tenantId, startedAt: { gte: start, lt: end }, status: { not: "CANCELLED" } },
-    include: { patient: { select: patientSelect }, assignedDoctor: true },
+    include: {
+      patient: { select: patientSelect },
+      assignedDoctor: true,
+      charges: { where: { status: { not: "VOIDED" } } },
+    },
     orderBy: { startedAt: "asc" },
   });
-  return encounters.map(serializeEncounter);
+  return encounters.map((encounter) => {
+    const chargeTotal = encounter.charges.reduce((sum, charge) => sum + money(charge.total), 0);
+    const unpaidBalance = encounter.charges.reduce((sum, charge) => {
+      if (charge.status !== "UNPAID" && charge.status !== "PARTIALLY_PAID") return sum;
+      return sum + money(charge.total) - money(charge.amountPaid);
+    }, 0);
+    const { charges: _charges, ...rest } = encounter;
+    void _charges;
+    return serializeEncounter({
+      ...rest,
+      unpaidBalance: Number(unpaidBalance.toFixed(2)),
+      chargeTotal: Number(chargeTotal.toFixed(2)),
+    });
+  });
 }
 
 export async function listPatientEncounters(tenantId: string, patientId: string) {
@@ -199,12 +224,13 @@ export async function refreshEncounterStatus(tx: TxClient, tenantId: string, enc
       charges: true,
     },
   });
-  if (!encounter || encounter.status === "CANCELLED" || encounter.status === "COMPLETED") return encounter;
+  if (!encounter || encounter.status === "CANCELLED") return encounter;
 
   const unpaid = encounter.charges.filter((c) => c.status === "UNPAID" || c.status === "PARTIALLY_PAID");
   const pendingLab = encounter.labOrders.filter((o) => o.status !== "COMPLETED" && o.status !== "CANCELLED");
   const processingLab = pendingLab.some((o) => o.status === "PROCESSING" || o.status === "ACCEPTED");
   const pendingRx = encounter.prescriptions.filter((p) => p.status === "PENDING" || p.status === "PARTIALLY_DISPENSED");
+  const walkIn = encounter.visitType === "WALK_IN_LAB" || encounter.visitType === "OTC_PHARMACY";
 
   let status: EncounterStatus = encounter.status;
   if (pendingLab.length) {
@@ -213,21 +239,21 @@ export async function refreshEncounterStatus(tx: TxClient, tenantId: string, enc
     status = "WAITING_PHARMACY";
   } else if (unpaid.length) {
     status = "WAITING_PAYMENT";
+  } else if (encounter.charges.length > 0 && !pendingLab.length && !pendingRx.length) {
+    status = "COMPLETED";
   } else if (encounter.consultation) {
     status = "WAITING_PAYMENT";
-  } else if (encounter.status === "REGISTERED") {
-    status = "WAITING_CONSULTATION";
-  }
-
-  if (unpaid.length === 0 && encounter.charges.length > 0 && !pendingLab.length && !pendingRx.length && encounter.consultation) {
-    status = "COMPLETED";
+  } else if (walkIn) {
+    status = encounter.visitType === "WALK_IN_LAB" ? "WAITING_LAB" : "WAITING_PAYMENT";
+  } else if (encounter.status === "REGISTERED" || encounter.status === "COMPLETED") {
+    status = encounter.status === "REGISTERED" ? "WAITING_CONSULTATION" : "COMPLETED";
   }
 
   return tx.encounter.update({
     where: { id: encounterId },
     data: {
       status,
-      completedAt: status === "COMPLETED" ? new Date() : encounter.completedAt,
+      completedAt: status === "COMPLETED" ? encounter.completedAt ?? new Date() : null,
     },
   });
 }
@@ -248,6 +274,22 @@ export async function todayStats(tenantId: string, timezone = "Africa/Nairobi") 
     e.charges.some((c) => c.status === "UNPAID" || c.status === "PARTIALLY_PAID"),
   ).length;
 
+  const unpaidAmount = encounters.reduce((sum, e) => {
+    return (
+      sum +
+      e.charges.reduce((chargeSum, charge) => {
+        if (charge.status !== "UNPAID" && charge.status !== "PARTIALLY_PAID") return chargeSum;
+        return chargeSum + money(charge.total) - money(charge.amountPaid);
+      }, 0)
+    );
+  }, 0);
+  const revenueByMethod: Record<string, number> = {};
+  for (const encounter of encounters) {
+    for (const payment of encounter.payments) {
+      revenueByMethod[payment.method] = (revenueByMethod[payment.method] || 0) + money(payment.amount);
+    }
+  }
+
   return {
     todaysPatients: encounters.length,
     waitingConsultation: count("WAITING_CONSULTATION") + count("REGISTERED"),
@@ -257,7 +299,11 @@ export async function todayStats(tenantId: string, timezone = "Africa/Nairobi") 
     waitingPayment: count("WAITING_PAYMENT"),
     completed: count("COMPLETED"),
     unpaidEncounters,
+    unpaidAmount: Number(unpaidAmount.toFixed(2)),
     todaysRevenue: revenue,
+    walkInLab: encounters.filter((e) => e.visitType === "WALK_IN_LAB").length,
+    otcPharmacy: encounters.filter((e) => e.visitType === "OTC_PHARMACY").length,
+    revenueByMethod,
   };
 }
 

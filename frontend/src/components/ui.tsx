@@ -26,8 +26,8 @@ export function Button({
   disabled?: boolean;
 }) {
   const styles = {
-    primary: "bg-[var(--brand)] text-white hover:bg-[var(--brand-dark)]",
-    secondary: "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50",
+    primary: "bg-[var(--brand)] text-white hover:bg-[var(--brand-dark)] active:scale-[0.98]",
+    secondary: "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 active:scale-[0.98]",
     ghost: "text-slate-600 hover:bg-slate-100",
   }[variant];
   return (
@@ -35,7 +35,7 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium disabled:opacity-50 ${styles}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium shadow-sm transition disabled:opacity-50 ${styles}`}
     >
       {children}
     </button>
@@ -93,6 +93,9 @@ export function StatusBadge({ status }: { status: string }) {
     FAILED: "bg-red-50 text-red-700",
     PENDING: "bg-amber-50 text-amber-800",
     REQUESTED: "bg-amber-50 text-amber-800",
+    STANDARD: "bg-slate-100 text-slate-700",
+    OTC_PHARMACY: "bg-teal-50 text-teal-800",
+    WALK_IN_LAB: "bg-violet-50 text-violet-800",
     DISPENSED: "bg-emerald-50 text-emerald-800",
   };
   return (
@@ -125,18 +128,29 @@ export function Stat({
   label,
   value,
   hint,
+  onClick,
 }: {
   label: string;
   value: string | number;
   hint?: string;
+  onClick?: () => void;
 }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3.5">
+  const cls = "rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition";
+  const inner = (
+    <>
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{value}</div>
       {hint ? <div className="mt-1 text-xs text-slate-500">{hint}</div> : null}
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={`${cls} w-full text-left hover:border-[var(--brand)] hover:shadow-sm`}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={cls}>{inner}</div>;
 }
 
 export function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
