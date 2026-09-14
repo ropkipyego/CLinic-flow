@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: clinicflow
+      POSTGRES_PASSWORD: clinicflow
+      POSTGRES_DB: clinicflow
+    ports:
+      - "5434:5432"
+    volumes:
+      - clinicflow_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clinicflow -d clinicflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    env_file:
+      - .env.development
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://clinicflow:clinicflow@postgres:5432/clinicflow
+      APP_URL: http://localhost:4000
+      FRONTEND_URL: http://localhost:5174
+      EMAIL_ENABLED: "false"
+      SMS_ENABLED: "false"
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "npx prisma migrate deploy &&
+             npx tsx prisma/seed.ts &&
+             npx tsx src/index.ts"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - .env.development
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://clinicflow:clinicflow@postgres:5432/clinicflow
+      EMAIL_ENABLED: "false"
+      SMS_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npx tsx src/workers/smsWorker.ts
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  web:
+    build:
+      context: ./frontend
+    ports:
+      - "5174:80"
+    depends_on:
+      - api
+
+volumes:
+  clinicflow_pg:

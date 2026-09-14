@@ -1,0 +1,760 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  RECEPTION
+  DOCTOR
+  LAB
+  PHARMACY
+  CASHIER
+}
+
+enum EncounterStatus {
+  REGISTERED
+  WAITING_CONSULTATION
+  IN_CONSULTATION
+  WAITING_LAB
+  LAB_PROCESSING
+  WAITING_PHARMACY
+  WAITING_PAYMENT
+  COMPLETED
+  CANCELLED
+}
+
+enum Sex {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum PaymentPreference {
+  CASH
+  INSURANCE
+  OTHER
+}
+
+enum LabResultType {
+  TEXT
+  NUMERIC
+  POSITIVE_NEGATIVE
+  SELECT
+}
+
+enum LabOrderStatus {
+  REQUESTED
+  ACCEPTED
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
+enum PrescriptionStatus {
+  PENDING
+  PARTIALLY_DISPENSED
+  DISPENSED
+  CANCELLED
+}
+
+enum StockMovementType {
+  PURCHASE
+  DISPENSE
+  ADJUSTMENT
+  RETURN
+  OPENING_BALANCE
+}
+
+enum ChargeStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  VOIDED
+}
+
+enum ChargeSource {
+  CONSULTATION
+  LABORATORY
+  PHARMACY
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH
+  MPESA
+  CARD
+  INSURANCE
+  OTHER
+}
+
+enum SmsCampaignStatus {
+  DRAFT
+  QUEUED
+  SENDING
+  COMPLETED
+  FAILED
+}
+
+enum SmsMessageStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+  DISABLED
+}
+
+model Tenant {
+  id             String   @id @default(uuid())
+  name           String
+  slug           String   @unique
+  logoUrl        String?
+  primaryColor   String   @default("#0F766E")
+  secondaryColor String   @default("#0EA5E9")
+  phone          String?
+  email          String?
+  address        String?
+  website        String?
+  receiptFooter  String?
+  smsSenderId    String?
+  timezone       String   @default("Africa/Nairobi")
+  currency       String   @default("KES")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users              User[]
+  patients           Patient[]
+  encounters         Encounter[]
+  consultations      Consultation[]
+  vitals             Vitals[]
+  diagnoses          Diagnosis[]
+  services           Service[]
+  labTests           LabTest[]
+  labOrders          LabOrder[]
+  labOrderItems      LabOrderItem[]
+  labResults         LabResult[]
+  medicines          Medicine[]
+  stockMovements     StockMovement[]
+  prescriptions      Prescription[]
+  prescriptionItems  PrescriptionItem[]
+  dispenses          Dispense[]
+  dispenseItems      DispenseItem[]
+  charges            Charge[]
+  payments           Payment[]
+  receipts           Receipt[]
+  smsCampaigns       SmsCampaign[]
+  smsMessages        SmsMessage[]
+  emailRecords       EmailRecord[]
+  auditLogs          AuditLog[]
+  sequences          Sequence[]
+}
+
+model User {
+  id           String    @id @default(uuid())
+  tenantId     String
+  email        String
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdEncounters   Encounter[]          @relation("EncounterCreatedBy")
+  assignedEncounters  Encounter[]          @relation("EncounterDoctor")
+  consultations       Consultation[]
+  vitals              Vitals[]
+  diagnoses           Diagnosis[]
+  labOrders           LabOrder[]
+  labResults          LabResult[]
+  prescriptions       Prescription[]
+  stockMovements      StockMovement[]
+  dispenses           Dispense[]
+  payments            Payment[]
+  receipts            Receipt[]
+  smsCampaigns        SmsCampaign[]
+  auditLogs           AuditLog[]
+  passwordResets      PasswordResetToken[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([tenantId, role])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model Patient {
+  id                String            @id @default(uuid())
+  tenantId          String
+  patientNumber     String
+  firstName         String
+  middleName        String?
+  lastName          String
+  phone             String
+  alternativePhone  String?
+  dateOfBirth       DateTime?         @db.Date
+  ageYears          Int?
+  sex               Sex
+  address           String?
+  nextOfKin         String?
+  nextOfKinPhone    String?
+  paymentMethod     PaymentPreference @default(CASH)
+  insuranceProvider String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  encounters        Encounter[]
+  consultations     Consultation[]
+  vitals            Vitals[]
+  diagnoses         Diagnosis[]
+  labOrders         LabOrder[]
+  labResults        LabResult[]
+  prescriptions     Prescription[]
+  dispenses         Dispense[]
+  charges           Charge[]
+  payments          Payment[]
+  receipts          Receipt[]
+
+  @@unique([tenantId, patientNumber])
+  @@index([tenantId])
+  @@index([tenantId, phone])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, patientNumber])
+}
+
+model Encounter {
+  id               String          @id @default(uuid())
+  tenantId         String
+  patientId        String
+  visitNumber      String
+  status           EncounterStatus @default(REGISTERED)
+  assignedDoctorId String?
+  createdById      String
+  startedAt        DateTime        @default(now())
+  completedAt      DateTime?
+  notes            String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  createdBy     User           @relation("EncounterCreatedBy", fields: [createdById], references: [id])
+  assignedDoctor User?         @relation("EncounterDoctor", fields: [assignedDoctorId], references: [id])
+  consultation  Consultation?
+  vitals        Vitals[]
+  diagnoses     Diagnosis[]
+  labOrders     LabOrder[]
+  labResults    LabResult[]
+  prescriptions Prescription[]
+  dispenses     Dispense[]
+  charges       Charge[]
+  payments      Payment[]
+  receipts      Receipt[]
+
+  @@unique([tenantId, visitNumber])
+  @@index([tenantId])
+  @@index([tenantId, startedAt])
+  @@index([tenantId, status])
+  @@index([tenantId, patientId])
+}
+
+model Consultation {
+  id                           String   @id @default(uuid())
+  tenantId                     String
+  encounterId                  String   @unique
+  patientId                    String
+  doctorId                     String
+  chiefComplaint               String?
+  historyOfPresentingComplaint String?
+  examination                  String?
+  assessment                   String?
+  plan                         String?
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  encounter Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor    User      @relation(fields: [doctorId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, patientId])
+}
+
+model Vitals {
+  id              String   @id @default(uuid())
+  tenantId        String
+  encounterId     String
+  patientId       String
+  recordedById    String
+  systolicBp      Int?
+  diastolicBp     Int?
+  pulse           Int?
+  temperature     Decimal? @db.Decimal(4, 1)
+  spo2            Int?
+  respiratoryRate Int?
+  weightKg        Decimal? @db.Decimal(5, 1)
+  heightCm        Decimal? @db.Decimal(5, 1)
+  createdAt       DateTime @default(now())
+
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  encounter  Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patient    Patient   @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  recordedBy User      @relation(fields: [recordedById], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, encounterId])
+}
+
+model Diagnosis {
+  id          String   @id @default(uuid())
+  tenantId    String
+  encounterId String
+  patientId   String
+  doctorId    String
+  name        String
+  icd10Code   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  encounter Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor    User      @relation(fields: [doctorId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, encounterId])
+}
+
+model Service {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  code      String
+  category  String
+  price     Decimal  @db.Decimal(12, 2)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  charges Charge[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+model LabTest {
+  id             String        @id @default(uuid())
+  tenantId       String
+  name           String
+  code           String
+  category       String        @default("RAPID")
+  price          Decimal       @db.Decimal(12, 2)
+  resultType     LabResultType
+  referenceRange String?
+  turnaroundTime String?
+  selectOptions  Json?
+  serviceId      String?
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderItems    LabOrderItem[]
+  results       LabResult[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+model LabOrder {
+  id          String         @id @default(uuid())
+  tenantId    String
+  encounterId String
+  patientId   String
+  orderedById String
+  status      LabOrderStatus @default(REQUESTED)
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  encounter Encounter      @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patient   Patient        @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  orderedBy User           @relation(fields: [orderedById], references: [id])
+  items     LabOrderItem[]
+  results   LabResult[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, encounterId])
+}
+
+model LabOrderItem {
+  id         String         @id @default(uuid())
+  tenantId   String
+  labOrderId String
+  labTestId  String
+  chargeId   String?
+  status     LabOrderStatus @default(REQUESTED)
+  createdAt  DateTime       @default(now())
+
+  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  labOrder LabOrder   @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  labTest  LabTest    @relation(fields: [labTestId], references: [id])
+  result   LabResult?
+
+  @@index([tenantId])
+  @@index([tenantId, labOrderId])
+}
+
+model LabResult {
+  id             String   @id @default(uuid())
+  tenantId       String
+  patientId      String
+  encounterId    String
+  labOrderId     String
+  labOrderItemId String   @unique
+  labTestId      String
+  performedById  String
+  valueText      String?
+  valueNumeric   Decimal? @db.Decimal(12, 3)
+  flag           String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patient      Patient      @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  encounter    Encounter    @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  labOrder     LabOrder     @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  labOrderItem LabOrderItem @relation(fields: [labOrderItemId], references: [id], onDelete: Cascade)
+  labTest      LabTest      @relation(fields: [labTestId], references: [id])
+  performedBy  User         @relation(fields: [performedById], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, encounterId])
+}
+
+model Medicine {
+  id             String   @id @default(uuid())
+  tenantId       String
+  name           String
+  genericName    String?
+  strength       String?
+  dosageForm     String?
+  unit           String   @default("unit")
+  sku            String
+  sellingPrice   Decimal  @db.Decimal(12, 2)
+  costPrice      Decimal  @db.Decimal(12, 2)
+  reorderLevel   Int      @default(10)
+  quantityOnHand Int      @default(0)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stockMovements    StockMovement[]
+  prescriptionItems PrescriptionItem[]
+  dispenseItems     DispenseItem[]
+  charges           Charge[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+}
+
+model StockMovement {
+  id               String            @id @default(uuid())
+  tenantId         String
+  medicineId       String
+  type             StockMovementType
+  quantity         Int
+  previousQuantity Int
+  newQuantity      Int
+  userId           String
+  reference        String?
+  notes            String?
+  createdAt        DateTime          @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, medicineId])
+  @@index([tenantId, createdAt])
+}
+
+model Prescription {
+  id          String             @id @default(uuid())
+  tenantId    String
+  encounterId String
+  patientId   String
+  doctorId    String
+  status      PrescriptionStatus @default(PENDING)
+  notes       String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  tenant    Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  encounter Encounter          @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patient   Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor    User               @relation(fields: [doctorId], references: [id])
+  items     PrescriptionItem[]
+  dispenses Dispense[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, encounterId])
+}
+
+model PrescriptionItem {
+  id             String   @id @default(uuid())
+  tenantId       String
+  prescriptionId String
+  medicineId     String
+  dose           String
+  frequency      String
+  duration       String
+  quantity       Int
+  instructions   String?
+  dispensedQty   Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  prescription Prescription   @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicine     Medicine       @relation(fields: [medicineId], references: [id])
+  dispenseItems DispenseItem[]
+
+  @@index([tenantId])
+}
+
+model Dispense {
+  id            String   @id @default(uuid())
+  tenantId      String
+  prescriptionId String
+  encounterId   String
+  patientId     String
+  pharmacistId  String
+  createdAt     DateTime @default(now())
+
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  prescription Prescription   @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  encounter    Encounter      @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patient      Patient        @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  pharmacist   User           @relation(fields: [pharmacistId], references: [id])
+  items        DispenseItem[]
+
+  @@index([tenantId])
+}
+
+model DispenseItem {
+  id                 String  @id @default(uuid())
+  tenantId           String
+  dispenseId         String
+  prescriptionItemId String
+  medicineId         String
+  quantity           Int
+  chargeId           String?
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dispense         Dispense         @relation(fields: [dispenseId], references: [id], onDelete: Cascade)
+  prescriptionItem PrescriptionItem @relation(fields: [prescriptionItemId], references: [id])
+  medicine         Medicine         @relation(fields: [medicineId], references: [id])
+
+  @@index([tenantId])
+}
+
+model Charge {
+  id          String       @id @default(uuid())
+  tenantId    String
+  encounterId String
+  patientId   String
+  serviceId   String?
+  medicineId  String?
+  source      ChargeSource
+  description String
+  quantity    Decimal      @db.Decimal(10, 2)
+  unitPrice   Decimal      @db.Decimal(12, 2)
+  total       Decimal      @db.Decimal(12, 2)
+  amountPaid  Decimal      @default(0) @db.Decimal(12, 2)
+  status      ChargeStatus @default(UNPAID)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  encounter Encounter  @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patient   Patient    @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  service   Service?   @relation(fields: [serviceId], references: [id])
+  medicine  Medicine?  @relation(fields: [medicineId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, encounterId])
+  @@index([tenantId, status])
+}
+
+model Payment {
+  id           String        @id @default(uuid())
+  tenantId     String
+  patientId    String
+  encounterId  String
+  receiptId    String
+  amount       Decimal       @db.Decimal(12, 2)
+  method       PaymentMethod
+  reference    String?
+  receivedById String
+  createdAt    DateTime      @default(now())
+
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patient    Patient   @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  encounter  Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  receipt    Receipt   @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  receivedBy User      @relation(fields: [receivedById], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, encounterId])
+}
+
+model Receipt {
+  id            String   @id @default(uuid())
+  tenantId      String
+  receiptNumber String
+  patientId     String
+  encounterId   String
+  issuedById    String
+  totalAmount   Decimal  @db.Decimal(12, 2)
+  amountPaid    Decimal  @db.Decimal(12, 2)
+  balance       Decimal  @db.Decimal(12, 2)
+  method        PaymentMethod
+  createdAt     DateTime @default(now())
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  encounter Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  issuedBy  User      @relation(fields: [issuedById], references: [id])
+  payments  Payment[]
+
+  @@unique([tenantId, receiptNumber])
+  @@index([tenantId])
+}
+
+model SmsCampaign {
+  id          String            @id @default(uuid())
+  tenantId    String
+  name        String
+  message     String
+  status      SmsCampaignStatus @default(DRAFT)
+  createdById String
+  queuedAt    DateTime?
+  completedAt DateTime?
+  sentCount   Int               @default(0)
+  failedCount Int               @default(0)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User         @relation(fields: [createdById], references: [id])
+  messages  SmsMessage[]
+
+  @@index([tenantId])
+}
+
+model SmsMessage {
+  id               String           @id @default(uuid())
+  tenantId         String
+  campaignId       String?
+  toPhone          String
+  body             String
+  status           SmsMessageStatus @default(QUEUED)
+  provider         String?
+  providerResponse String?
+  attempts         Int              @default(0)
+  lastError        String?
+  sentAt           DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaign SmsCampaign?  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([campaignId])
+}
+
+model EmailRecord {
+  id        String      @id @default(uuid())
+  tenantId  String?
+  toEmail   String
+  subject   String
+  body      String
+  purpose   String
+  status    EmailStatus @default(QUEUED)
+  provider  String?
+  lastError String?
+  sentAt    DateTime?
+  createdAt DateTime    @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entity])
+}
+
+model Sequence {
+  id       String @id @default(uuid())
+  tenantId String
+  name     String
+  dateKey  String @default("")
+  value    Int    @default(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name, dateKey])
+}
