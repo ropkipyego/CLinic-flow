@@ -2,7 +2,8 @@ import { LabOrderStatus, LabResultType } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
-import { badRequest, notFound } from "../lib/errors.js";
+import { badRequest, conflict, notFound } from "../lib/errors.js";
+import { CLINIC_LAB_TESTS } from "../data/labCatalog.js";
 import { money, toNumber } from "../lib/serialize.js";
 import { createChargeInTx } from "./billingService.js";
 import { refreshEncounterStatus } from "./encounterService.js";
@@ -20,6 +21,10 @@ export const labTestSchema = z.object({
   active: z.boolean().optional(),
 });
 
+export const labPricePatchSchema = z.object({
+  price: z.number().nonnegative(),
+});
+
 export const createLabOrderSchema = z.object({
   labTestIds: z.array(z.string().uuid()).min(1),
   notes: z.string().optional().nullable(),
@@ -33,10 +38,14 @@ export const labResultSchema = z.object({
 });
 
 export async function listLabTests(tenantId: string, activeOnly = false) {
-  return prisma.labTest.findMany({
+  const rows = await prisma.labTest.findMany({
     where: { tenantId, ...(activeOnly ? { active: true } : {}) },
-    orderBy: { name: "asc" },
+    orderBy: [{ category: "asc" }, { name: "asc" }],
   });
+  return rows.map((t) => ({
+    ...t,
+    price: money(t.price),
+  }));
 }
 
 export async function upsertLabTest(
@@ -57,8 +66,16 @@ export async function upsertLabTest(
     active: input.active ?? true,
   };
 
+  const clash = await prisma.labTest.findFirst({
+    where: { tenantId, code: data.code, ...(id ? { NOT: { id } } : {}) },
+  });
+  if (clash) throw conflict("Another lab test already uses that code.");
+
   const test = id
-    ? await prisma.labTest.update({ where: { id }, data })
+    ? await prisma.labTest.findFirst({ where: { id, tenantId } }).then(async (existing) => {
+        if (!existing) throw notFound("Lab test not found.");
+        return prisma.labTest.update({ where: { id }, data });
+      })
     : await prisma.labTest.create({ data: { tenantId, ...data } });
 
   const existingService = await prisma.service.findFirst({
@@ -93,7 +110,68 @@ export async function upsertLabTest(
     entity: "lab_test",
     entityId: test.id,
   });
-  return prisma.labTest.findFirst({ where: { id: test.id, tenantId } });
+  const saved = await prisma.labTest.findFirst({ where: { id: test.id, tenantId } });
+  return saved ? { ...saved, price: money(saved.price) } : saved;
+}
+
+export async function updateLabTestPrice(
+  tenantId: string,
+  actorId: string,
+  id: string,
+  price: number,
+) {
+  const existing = await prisma.labTest.findFirst({ where: { id, tenantId } });
+  if (!existing) throw notFound("Lab test not found.");
+  const test = await prisma.labTest.update({ where: { id }, data: { price } });
+  const service = existing.serviceId
+    ? await prisma.service.findFirst({ where: { id: existing.serviceId, tenantId } })
+    : await prisma.service.findFirst({ where: { tenantId, code: existing.code } });
+  if (service) {
+    await prisma.service.update({ where: { id: service.id }, data: { price } });
+  }
+  await writeAudit({
+    tenantId,
+    userId: actorId,
+    action: "lab_test.price_updated",
+    entity: "lab_test",
+    entityId: test.id,
+    metadata: { code: existing.code, from: money(existing.price), to: price },
+  });
+  return { ...test, price: money(test.price) };
+}
+
+export async function applyLabCatalog(tenantId: string, actorId: string) {
+  let created = 0;
+  let updated = 0;
+  for (const t of CLINIC_LAB_TESTS) {
+    const existing = await prisma.labTest.findFirst({ where: { tenantId, code: t.code } });
+    await upsertLabTest(
+      tenantId,
+      actorId,
+      {
+        name: t.name,
+        code: t.code,
+        category: t.category,
+        price: t.price,
+        resultType: t.resultType,
+        referenceRange: t.referenceRange ?? null,
+        turnaroundTime: t.tat,
+        selectOptions: t.selectOptions,
+        active: true,
+      },
+      existing?.id,
+    );
+    if (existing) updated += 1;
+    else created += 1;
+  }
+  await writeAudit({
+    tenantId,
+    userId: actorId,
+    action: "lab.catalog_applied",
+    entity: "lab_test",
+    metadata: { created, updated, total: CLINIC_LAB_TESTS.length },
+  });
+  return { created, updated, total: CLINIC_LAB_TESTS.length };
 }
 
 export async function createLabOrder(

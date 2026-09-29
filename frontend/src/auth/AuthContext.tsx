@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { get, post } from "../api/client";
+import { isClinicAdmin } from "../lib/roles";
 
-export type Role = "ADMIN" | "RECEPTION" | "DOCTOR" | "LAB" | "PHARMACY" | "CASHIER";
+export type Role = "SUPER_ADMIN" | "ADMIN" | "RECEPTION" | "DOCTOR" | "LAB" | "PHARMACY" | "CASHIER";
 
 export type User = {
   id: string;
@@ -97,5 +98,5 @@ export function useAuth() {
 }
 
 export function canSee(role: Role, allowed: Role[]) {
-  return role === "ADMIN" || allowed.includes(role);
+  return isClinicAdmin(role) || allowed.includes(role);
 }

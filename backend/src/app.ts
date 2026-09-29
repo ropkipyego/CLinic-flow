@@ -12,6 +12,7 @@ import { encountersRouter } from "./routes/encounters.js";
 import { consultationsRouter, diagnosesRouter, vitalsRouter } from "./routes/consultations.js";
 import { labRouter } from "./routes/lab.js";
 import { inventoryRouter, pharmacyRouter } from "./routes/pharmacy.js";
+import { procurementRouter } from "./routes/procurement.js";
 import { chargesRouter, paymentsRouter, receiptsRouter, servicesRouter } from "./routes/billing.js";
 import { reportsRouter } from "./routes/reports.js";
 import { auditRouter, emailRouter, smsRouter } from "./routes/comms.js";
@@ -26,7 +27,7 @@ export function createApp() {
       credentials: true,
     }),
   );
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "2mb" }));
 
   const limiter = rateLimit({
     windowMs: env.rateLimitWindowMs,
@@ -58,6 +59,7 @@ export function createApp() {
   api.use("/lab", labRouter);
   api.use("/pharmacy", pharmacyRouter);
   api.use("/inventory", inventoryRouter);
+  api.use("/procurement", procurementRouter);
   api.use("/services", servicesRouter);
   api.use("/charges", chargesRouter);
   api.use("/payments", paymentsRouter);

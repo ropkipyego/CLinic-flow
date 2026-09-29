@@ -1,7 +1,8 @@
 import type { Role } from "../auth/AuthContext";
 
 export const ROLE_LABEL: Record<Role, string> = {
-  ADMIN: "Super Admin",
+  SUPER_ADMIN: "Super Admin",
+  ADMIN: "Admin",
   RECEPTION: "Reception",
   DOCTOR: "Doctor",
   LAB: "Laboratory",

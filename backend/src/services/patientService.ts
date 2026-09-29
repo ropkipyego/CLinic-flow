@@ -2,7 +2,7 @@ import { PaymentPreference, Sex } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
-import { badRequest, notFound } from "../lib/errors.js";
+import { badRequest, conflict, notFound } from "../lib/errors.js";
 import { nextPatientNumber } from "../lib/sequences.js";
 import { displayName, patientAge } from "../lib/serialize.js";
 
@@ -22,7 +22,12 @@ const patientFields = {
   insuranceProvider: z.string().optional().nullable(),
 };
 
-export const createPatientSchema = z.object(patientFields).refine(
+export const createPatientSchema = z
+  .object({
+    ...patientFields,
+    confirmDuplicate: z.boolean().optional(),
+  })
+  .refine(
   (v) => Boolean(v.dateOfBirth) || (v.ageYears !== undefined && v.ageYears !== null),
   { message: "Provide a date of birth or an age." },
 ).superRefine((v, ctx) => {
@@ -81,12 +86,89 @@ export function serializePatient(patient: {
   };
 }
 
+function phoneDigits(phone?: string | null) {
+  return (phone || "").replace(/\D/g, "");
+}
+
+export async function findPossibleDuplicates(
+  tenantId: string,
+  input: { phone?: string | null; firstName?: string | null; lastName?: string | null; dateOfBirth?: string | null; excludeId?: string },
+) {
+  const digits = phoneDigits(input.phone);
+  const last9 = digits.slice(-9);
+  const or: object[] = [];
+  if (last9.length >= 9) {
+    or.push({ phone: { contains: last9 } }, { alternativePhone: { contains: last9 } });
+  }
+  if (input.firstName?.trim() && input.lastName?.trim()) {
+    const nameMatch: Record<string, unknown> = {
+      firstName: { equals: input.firstName.trim(), mode: "insensitive" },
+      lastName: { equals: input.lastName.trim(), mode: "insensitive" },
+    };
+    if (input.dateOfBirth) nameMatch.dateOfBirth = new Date(input.dateOfBirth);
+    or.push(nameMatch);
+  }
+  if (!or.length) return [];
+  const rows = await prisma.patient.findMany({
+    where: {
+      tenantId,
+      ...(input.excludeId ? { NOT: { id: input.excludeId } } : {}),
+      OR: or,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 8,
+  });
+  return rows.map(serializePatient);
+}
+
+export async function listPatientRegistry(
+  tenantId: string,
+  opts: { q?: string; sex?: string; page?: number; take?: number },
+) {
+  const page = Math.max(1, opts.page ?? 1);
+  const take = Math.min(100, Math.max(10, opts.take ?? 30));
+  const q = opts.q?.trim();
+  const where = {
+    tenantId,
+    ...(opts.sex ? { sex: opts.sex as never } : {}),
+    ...(q
+      ? {
+          OR: [
+            { patientNumber: { contains: q, mode: "insensitive" as const } },
+            { phone: { contains: q } },
+            { alternativePhone: { contains: q } },
+            { firstName: { contains: q, mode: "insensitive" as const } },
+            { lastName: { contains: q, mode: "insensitive" as const } },
+            { middleName: { contains: q, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+  const [total, rows] = await Promise.all([
+    prisma.patient.count({ where }),
+    prisma.patient.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * take,
+      take,
+    }),
+  ]);
+  return { items: rows.map(serializePatient), total, page, take, pages: Math.max(1, Math.ceil(total / take)) };
+}
+
 export async function createPatient(
   tenantId: string,
   actorId: string,
   input: z.infer<typeof createPatientSchema>,
   ip?: string,
 ) {
+  const duplicates = await findPossibleDuplicates(tenantId, input);
+  if (duplicates.length && !input.confirmDuplicate) {
+    throw conflict(
+      "A matching patient is already registered. Open their chart instead of creating a second file.",
+      { duplicates },
+    );
+  }
   const patient = await prisma.$transaction(async (tx) => {
     const patientNumber = await nextPatientNumber(tx, tenantId);
     const created = await tx.patient.create({
@@ -134,6 +216,18 @@ export async function updatePatient(
 ) {
   const existing = await prisma.patient.findFirst({ where: { id: patientId, tenantId } });
   if (!existing) throw notFound("Patient not found.");
+  if (input.phone || (input.firstName && input.lastName)) {
+    const duplicates = await findPossibleDuplicates(tenantId, {
+      phone: input.phone ?? existing.phone,
+      firstName: input.firstName ?? existing.firstName,
+      lastName: input.lastName ?? existing.lastName,
+      dateOfBirth: input.dateOfBirth ?? existing.dateOfBirth?.toISOString().slice(0, 10),
+      excludeId: patientId,
+    });
+    if (duplicates.length) {
+      throw conflict("Those details match another patient. Check the registry before saving.", { duplicates });
+    }
+  }
   if (input.dateOfBirth === null && input.ageYears === null) {
     throw badRequest("Provide a date of birth or an age.");
   }

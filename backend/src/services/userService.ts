@@ -3,11 +3,12 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { generateStaffPassword, hashPassword } from "../lib/password.js";
 import { writeAudit } from "../lib/audit.js";
-import { badRequest, conflict, notFound } from "../lib/errors.js";
+import { badRequest, conflict, forbidden, notFound } from "../lib/errors.js";
 import { env } from "../config/env.js";
 import { sendEmail } from "./email/index.js";
+import { isSuperAdmin, ROLE_RIGHTS, rolesAssignableBy, STAFF_ROLES } from "../lib/roles.js";
 
-export const STAFF_ROLES: Role[] = ["RECEPTION", "DOCTOR", "LAB", "PHARMACY", "CASHIER"];
+export { STAFF_ROLES };
 
 export const createUserSchema = z.object({
   email: z.string().email(),
@@ -46,19 +47,36 @@ function publicUser(user: {
     active: user.active,
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
-    isSuperAdmin: user.role === "ADMIN",
+    isSuperAdmin: user.role === "SUPER_ADMIN",
+    isClinicAdmin: user.role === "SUPER_ADMIN" || user.role === "ADMIN",
   };
 }
 
-async function countActiveAdmins(tenantId: string, exceptUserId?: string) {
+function roleLabel(role: Role) {
+  if (role === "SUPER_ADMIN") return "Super Admin";
+  if (role === "ADMIN") return "Admin";
+  return role.toLowerCase();
+}
+
+async function countActiveSuperAdmins(tenantId: string, exceptUserId?: string) {
   return prisma.user.count({
     where: {
       tenantId,
-      role: "ADMIN",
+      role: "SUPER_ADMIN",
       active: true,
       ...(exceptUserId ? { NOT: { id: exceptUserId } } : {}),
     },
   });
+}
+
+function assertCanAssign(actorRole: Role, targetRole: Role) {
+  if (!rolesAssignableBy(actorRole).includes(targetRole)) {
+    throw forbidden(
+      actorRole === "ADMIN"
+        ? "Only the Super Admin can create or change Super Admin accounts."
+        : "Your role cannot assign that permission.",
+    );
+  }
 }
 
 export async function listUsers(tenantId: string) {
@@ -69,12 +87,21 @@ export async function listUsers(tenantId: string) {
   return users.map(publicUser);
 }
 
+export function listRoleRights(actorRole: Role) {
+  return {
+    actorRole,
+    assignableRoles: rolesAssignableBy(actorRole),
+    rights: ROLE_RIGHTS,
+  };
+}
+
 export async function createUser(
   tenantId: string,
-  actorId: string,
+  actor: { id: string; role: Role },
   input: z.infer<typeof createUserSchema>,
   ip?: string,
 ) {
+  assertCanAssign(actor.role, input.role);
   const email = input.email.toLowerCase();
   const exists = await prisma.user.findFirst({ where: { tenantId, email } });
   if (exists) throw conflict("A user with this email already exists in this clinic.");
@@ -96,15 +123,14 @@ export async function createUser(
   });
   await writeAudit({
     tenantId,
-    userId: actorId,
+    userId: actor.id,
     action: "user.created",
     entity: "user",
     entityId: user.id,
-    metadata: { role: user.role, email: user.email, superAdmin: user.role === "ADMIN" },
+    metadata: { role: user.role, email: user.email, superAdmin: user.role === "SUPER_ADMIN" },
     ipAddress: ip,
   });
 
-  const roleLabel = user.role === "ADMIN" ? "Super Admin" : user.role.toLowerCase();
   await sendEmail({
     tenantId,
     to: user.email,
@@ -113,11 +139,11 @@ export async function createUser(
     body: [
       `Hello ${user.firstName},`,
       "",
-      `The Super Admin created a ${roleLabel} account for you at ${tenant?.name || "the clinic"}.`,
+      `A ${roleLabel(user.role)} account was created for you at ${tenant?.name || "the clinic"}.`,
       "",
       `Sign in: ${env.frontendUrl}/login`,
       `Email: ${user.email}`,
-      generatedPassword ? `Temporary password: ${password}` : "Use the password your Super Admin gave you, then change it after sign-in if needed.",
+      generatedPassword ? `Temporary password: ${password}` : "Use the password you were given, then change it after sign-in if needed.",
       "",
       "Keep this email private. Do not share your password.",
     ].join("\n"),
@@ -132,24 +158,28 @@ export async function createUser(
 
 export async function updateUser(
   tenantId: string,
-  actorId: string,
+  actor: { id: string; role: Role },
   userId: string,
   input: z.infer<typeof updateUserSchema>,
   ip?: string,
 ) {
   const existing = await prisma.user.findFirst({ where: { id: userId, tenantId } });
   if (!existing) throw notFound("User not found.");
+  if (existing.role === "SUPER_ADMIN" && !isSuperAdmin(actor.role)) {
+    throw forbidden("Only a Super Admin can change a Super Admin account.");
+  }
+  if (input.role) assertCanAssign(actor.role, input.role);
   if (input.email && input.email.toLowerCase() !== existing.email) {
     const clash = await prisma.user.findFirst({
       where: { tenantId, email: input.email.toLowerCase(), NOT: { id: userId } },
     });
     if (clash) throw conflict("A user with this email already exists in this clinic.");
   }
-  if (existing.id === actorId && input.active === false) {
-    throw badRequest("You cannot deactivate your own Super Admin account.");
+  if (existing.id === actor.id && input.active === false) {
+    throw badRequest("You cannot deactivate your own account.");
   }
-  if (existing.role === "ADMIN" && (input.active === false || (input.role && input.role !== "ADMIN"))) {
-    const others = await countActiveAdmins(tenantId, userId);
+  if (existing.role === "SUPER_ADMIN" && (input.active === false || (input.role && input.role !== "SUPER_ADMIN"))) {
+    const others = await countActiveSuperAdmins(tenantId, userId);
     if (others === 0) {
       throw badRequest("This clinic must keep at least one Super Admin.");
     }
@@ -169,7 +199,7 @@ export async function updateUser(
 
   await writeAudit({
     tenantId,
-    userId: actorId,
+    userId: actor.id,
     action: input.role && input.role !== existing.role ? "user.permissions_changed" : "user.updated",
     entity: "user",
     entityId: user.id,

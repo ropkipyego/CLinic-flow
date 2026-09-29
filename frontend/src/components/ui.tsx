@@ -97,6 +97,11 @@ export function StatusBadge({ status }: { status: string }) {
     OTC_PHARMACY: "bg-teal-50 text-teal-800",
     WALK_IN_LAB: "bg-violet-50 text-violet-800",
     DISPENSED: "bg-emerald-50 text-emerald-800",
+    DRAFT: "bg-slate-100 text-slate-700",
+    ISSUED: "bg-sky-50 text-sky-800",
+    PARTIAL: "bg-amber-50 text-amber-800",
+    RECEIVED: "bg-emerald-50 text-emerald-800",
+    POSTED: "bg-emerald-50 text-emerald-800",
   };
   return (
     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${map[status] || "bg-slate-100 text-slate-700"}`}>

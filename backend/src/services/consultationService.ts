@@ -63,10 +63,14 @@ export async function saveConsultation(
       where: { tenantId, encounterId, source: "CONSULTATION", status: { not: "VOIDED" } },
     });
     if (!existingCharge) {
-      const service = await tx.service.findFirst({
-        where: { tenantId, category: "CONSULTATION", active: true },
-        orderBy: { createdAt: "asc" },
-      });
+      const service =
+        (await tx.service.findFirst({
+          where: { tenantId, code: "CONSULT", active: true },
+        })) ||
+        (await tx.service.findFirst({
+          where: { tenantId, category: "CONSULTATION", active: true },
+          orderBy: { createdAt: "asc" },
+        }));
       if (service) {
         await createChargeInTx(tx, {
           tenantId,

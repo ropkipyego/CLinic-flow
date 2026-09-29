@@ -19,7 +19,11 @@ export function LoginPage() {
     try {
       await login(email, password);
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : "Unable to sign in. Please try again.");
+      if (err instanceof ApiRequestError && err.status === 0) {
+        setError("Cannot reach the ClinicFlow API. Start PostgreSQL and the backend, then try again.");
+      } else {
+        setError(err instanceof ApiRequestError ? err.message : "Unable to sign in. Please try again.");
+      }
     } finally {
       setBusy(false);
     }

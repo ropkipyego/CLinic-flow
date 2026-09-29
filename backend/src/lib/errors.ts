@@ -23,4 +23,4 @@ export const forbidden = (message = "You are not authorized to perform this acti
 export const notFound = (message = "Resource not found.") =>
   new AppError(404, "NOT_FOUND", message);
 
-export const conflict = (message: string) => new AppError(409, "CONFLICT", message);
+export const conflict = (message: string, details?: unknown) => new AppError(409, "CONFLICT", message, details);

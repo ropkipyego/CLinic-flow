@@ -3,6 +3,7 @@ import type { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { verifyToken } from "../lib/jwt.js";
 import { forbidden, unauthorized } from "../lib/errors.js";
+import { isClinicAdmin } from "../lib/roles.js";
 
 export async function authenticate(req: Request, _res: Response, next: NextFunction) {
   try {
@@ -33,7 +34,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
 export function authorize(...roles: Role[]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) return next(unauthorized());
-    if (req.user.role === "ADMIN") return next();
+    if (isClinicAdmin(req.user.role)) return next();
     if (!roles.includes(req.user.role)) {
       return next(forbidden("Your role is not permitted to access this resource."));
     }

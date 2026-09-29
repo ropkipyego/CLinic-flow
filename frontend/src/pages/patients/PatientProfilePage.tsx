@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { get, post } from "../../api/client";
 import { Alert, Button, Empty, PageHeader, StatusBadge, Table } from "../../components/ui";
 import { useAuth } from "../../auth/AuthContext";
+import { isClinicAdmin } from "../../lib/roles";
 
 export function PatientProfilePage() {
   const { id } = useParams();
@@ -35,7 +36,14 @@ export function PatientProfilePage() {
       <PageHeader
         title={data.patient.name}
         subtitle={`${data.patient.patientNumber} · ${data.patient.age ?? "—"}/${data.patient.sex[0]} · ${data.patient.phone}`}
-        actions={["ADMIN", "RECEPTION"].includes(user!.role) ? <Button onClick={() => void startVisit()}>Start visit</Button> : null}
+        actions={
+          isClinicAdmin(user!.role) || user!.role === "RECEPTION" ? (
+            <div className="flex gap-2">
+              <Link to={`/patients/${id}/edit`}><Button variant="secondary">Edit</Button></Link>
+              <Button onClick={() => void startVisit()}>Start visit</Button>
+            </div>
+          ) : null
+        }
       />
       <section>
         <h2 className="mb-2 font-medium">Encounter history</h2>

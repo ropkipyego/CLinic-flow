@@ -16,12 +16,15 @@ import { ReceiptPage } from "./pages/cashier/ReceiptPage";
 import { ReportsPage } from "./pages/reports/ReportsPage";
 import { SmsPage } from "./pages/sms/SmsPage";
 import { AdminPage } from "./pages/admin/AdminPage";
+import { RolesPage } from "./pages/admin/RolesPage";
+import { PriceListPage } from "./pages/admin/PriceListPage";
+import { isClinicAdmin } from "./lib/roles";
 
 function Guard({ roles, children }: { roles?: Role[]; children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (roles && user.role !== "ADMIN" && !roles.includes(user.role)) return <Navigate to="/" replace />;
+  if (roles && !isClinicAdmin(user.role) && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -41,19 +44,22 @@ export function App() {
         }
       >
         <Route path="/" element={<DashboardPage />} />
-        <Route path="/patients" element={<Guard roles={["RECEPTION", "DOCTOR", "CASHIER"]}><PatientsPage /></Guard>} />
+        <Route path="/patients" element={<Guard roles={["RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"]}><PatientsPage /></Guard>} />
         <Route path="/patients/new" element={<Guard roles={["RECEPTION"]}><PatientFormPage /></Guard>} />
+        <Route path="/patients/:id/edit" element={<Guard roles={["RECEPTION"]}><PatientFormPage /></Guard>} />
         <Route path="/patients/:id" element={<PatientProfilePage />} />
         <Route path="/visits" element={<Guard roles={["RECEPTION", "DOCTOR"]}><VisitsPage /></Guard>} />
         <Route path="/consultation" element={<Guard roles={["DOCTOR"]}><ConsultationPage /></Guard>} />
         <Route path="/consultation/:encounterId" element={<Guard roles={["DOCTOR"]}><ConsultationPage /></Guard>} />
         <Route path="/laboratory" element={<Guard roles={["LAB", "DOCTOR", "RECEPTION"]}><LabPage /></Guard>} />
         <Route path="/pharmacy" element={<Guard roles={["PHARMACY"]}><PharmacyPage /></Guard>} />
-        <Route path="/cashier" element={<Guard roles={["CASHIER"]}><CashierPage /></Guard>} />
-        <Route path="/cashier/receipts/:id" element={<Guard roles={["CASHIER"]}><ReceiptPage /></Guard>} />
+        <Route path="/cashier" element={<Guard roles={["CASHIER", "RECEPTION"]}><CashierPage /></Guard>} />
+        <Route path="/cashier/receipts/:id" element={<Guard roles={["CASHIER", "RECEPTION"]}><ReceiptPage /></Guard>} />
         <Route path="/reports" element={<Guard roles={[]}><ReportsPage /></Guard>} />
         <Route path="/sms" element={<Guard roles={[]}><SmsPage /></Guard>} />
         <Route path="/admin" element={<Guard roles={[]}><AdminPage /></Guard>} />
+        <Route path="/admin/roles" element={<Guard roles={[]}><RolesPage /></Guard>} />
+        <Route path="/admin/prices" element={<Guard roles={[]}><PriceListPage /></Guard>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

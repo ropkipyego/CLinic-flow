@@ -1,6 +1,8 @@
+import "../src/config/env.js";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { CLINIC_LAB_TESTS, MANUAL_CHARGE_SERVICES } from "../src/data/labCatalog.js";
+import { applyPharmacyCatalog } from "../src/services/pharmacyService.js";
 
 const prisma = new PrismaClient();
 
@@ -37,7 +39,8 @@ async function main() {
   });
 
   const users = [
-    { email: "admin@demo.clinic", firstName: "Amina", lastName: "Otieno", role: "ADMIN" as const },
+    { email: "admin@demo.clinic", firstName: "Amina", lastName: "Otieno", role: "SUPER_ADMIN" as const },
+    { email: "manager@demo.clinic", firstName: "Daniel", lastName: "Koech", role: "ADMIN" as const },
     { email: "reception@demo.clinic", firstName: "James", lastName: "Mwangi", role: "RECEPTION" as const },
     { email: "doctor@demo.clinic", firstName: "Grace", lastName: "Wanjiku", role: "DOCTOR" as const },
     { email: "lab@demo.clinic", firstName: "Peter", lastName: "Kamau", role: "LAB" as const },
@@ -48,7 +51,7 @@ async function main() {
   for (const u of users) {
     await prisma.user.upsert({
       where: { tenantId_email: { tenantId: tenant.id, email: u.email } },
-      update: {},
+      update: { role: u.role, firstName: u.firstName, lastName: u.lastName },
       create: { tenantId: tenant.id, ...u, passwordHash: password },
     });
   }
@@ -101,38 +104,9 @@ async function main() {
     });
   }
 
-  const medicines = [
-    { name: "Paracetamol", genericName: "Paracetamol", strength: "500mg", dosageForm: "Tablet", unit: "tab", sku: "PARA500", sellingPrice: 10, costPrice: 4, reorderLevel: 50, quantityOnHand: 200 },
-    { name: "Amoxicillin", genericName: "Amoxicillin", strength: "250mg", dosageForm: "Capsule", unit: "cap", sku: "AMOX250", sellingPrice: 20, costPrice: 8, reorderLevel: 40, quantityOnHand: 120 },
-    { name: "ORS", genericName: "Oral rehydration salts", strength: "20.5g", dosageForm: "Sachet", unit: "sachet", sku: "ORS205", sellingPrice: 30, costPrice: 12, reorderLevel: 20, quantityOnHand: 80 },
-    { name: "AL", genericName: "Artemether/Lumefantrine", strength: "20/120mg", dosageForm: "Tablet", unit: "tab", sku: "AL20120", sellingPrice: 15, costPrice: 6, reorderLevel: 30, quantityOnHand: 90 },
-  ];
-
   const admin = await prisma.user.findFirst({ where: { tenantId: tenant.id, email: "admin@demo.clinic" } });
-  for (const m of medicines) {
-    const med = await prisma.medicine.upsert({
-      where: { tenantId_sku: { tenantId: tenant.id, sku: m.sku } },
-      update: { quantityOnHand: m.quantityOnHand, sellingPrice: m.sellingPrice },
-      create: { tenantId: tenant.id, ...m, active: true },
-    });
-    const existingMove = await prisma.stockMovement.findFirst({
-      where: { tenantId: tenant.id, medicineId: med.id, type: "OPENING_BALANCE" },
-    });
-    if (!existingMove && admin) {
-      await prisma.stockMovement.create({
-        data: {
-          tenantId: tenant.id,
-          medicineId: med.id,
-          type: "OPENING_BALANCE",
-          quantity: m.quantityOnHand,
-          previousQuantity: 0,
-          newQuantity: m.quantityOnHand,
-          userId: admin.id,
-          reference: "SEED",
-          notes: "Opening balance",
-        },
-      });
-    }
+  if (admin) {
+    await applyPharmacyCatalog(tenant.id, admin.id);
   }
 
   const samplePatients = [
@@ -162,7 +136,22 @@ async function main() {
   });
 
   console.log("Seed complete. Demo tenant: demo-clinic");
-  console.log("Users: admin|reception|doctor|lab|pharmacy|cashier @demo.clinic / Password123!");
+  const existingSupplier = await prisma.supplier.findFirst({
+    where: { tenantId: tenant.id, name: "Local Chemist" },
+  });
+  if (!existingSupplier) {
+    await prisma.supplier.create({
+      data: {
+        tenantId: tenant.id,
+        name: "Local Chemist",
+        phone: "0700111222",
+        location: "Nairobi",
+        notes: "Default supplier for clinic LPOs",
+      },
+    });
+  }
+
+  console.log("Users: admin (Super Admin)|manager (Admin)|reception|doctor|lab|pharmacy|cashier @demo.clinic / Password123!");
 }
 
 main()

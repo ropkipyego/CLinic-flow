@@ -3,7 +3,16 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import { param } from "../lib/params.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 import { created, ok } from "../lib/response.js";
-import { getService, listServices, serviceSchema, upsertService } from "../services/catalogService.js";
+import {
+  applyHospitalCatalog,
+  getService,
+  listServiceCategories,
+  listServices,
+  pricePatchSchema,
+  serviceSchema,
+  updateServicePrice,
+  upsertService,
+} from "../services/catalogService.js";
 import {
   addManualCharge,
   cashierToday,
@@ -24,10 +33,30 @@ servicesRouter.get(
   asyncHandler(async (req, res) => ok(res, await listServices(req.user!.tenantId, req.query.active === "true"))),
 );
 
+servicesRouter.get(
+  "/categories",
+  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"),
+  asyncHandler(async (_req, res) => ok(res, listServiceCategories())),
+);
+
+servicesRouter.post(
+  "/catalog/apply",
+  authorize("ADMIN"),
+  asyncHandler(async (req, res) => ok(res, await applyHospitalCatalog(req.user!.tenantId, req.user!.id))),
+);
+
 servicesRouter.post(
   "/",
   authorize("ADMIN"),
   asyncHandler(async (req, res) => created(res, await upsertService(req.user!.tenantId, req.user!.id, serviceSchema.parse(req.body)))),
+);
+
+servicesRouter.patch(
+  "/:id/price",
+  authorize("ADMIN"),
+  asyncHandler(async (req, res) =>
+    ok(res, await updateServicePrice(req.user!.tenantId, req.user!.id, param(req, "id"), pricePatchSchema.parse(req.body).price)),
+  ),
 );
 
 servicesRouter.patch(
@@ -45,7 +74,7 @@ servicesRouter.get(
 );
 
 export const chargesRouter = Router();
-chargesRouter.use(authenticate, authorize("ADMIN", "CASHIER"));
+chargesRouter.use(authenticate, authorize("ADMIN", "CASHIER", "RECEPTION"));
 chargesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
@@ -63,7 +92,7 @@ chargesRouter.post(
 );
 
 export const paymentsRouter = Router();
-paymentsRouter.use(authenticate, authorize("ADMIN", "CASHIER"));
+paymentsRouter.use(authenticate, authorize("ADMIN", "CASHIER", "RECEPTION"));
 
 paymentsRouter.get(
   "/today",
@@ -86,7 +115,7 @@ paymentsRouter.post(
 );
 
 export const receiptsRouter = Router();
-receiptsRouter.use(authenticate, authorize("ADMIN", "CASHIER"));
+receiptsRouter.use(authenticate, authorize("ADMIN", "CASHIER", "RECEPTION"));
 receiptsRouter.get(
   "/:id",
   asyncHandler(async (req, res) => ok(res, await getReceipt(req.user!.tenantId, param(req, "id")))),

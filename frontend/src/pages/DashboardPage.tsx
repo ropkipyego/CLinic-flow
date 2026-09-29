@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { get } from "../api/client";
-import { Alert, Button, Empty, PageHeader, Stat, StatusBadge, Table, cellClass } from "../components/ui";
+import { Alert, Button, Empty, PageHeader, Stat, StatusBadge, Table, cellClass, inputClass } from "../components/ui";
 import { Icons } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
 import { formatMoney, VISIT_TYPE_LABEL } from "../lib/labels";
 import { useUiState } from "../lib/uiState";
+import { isClinicAdmin } from "../lib/roles";
 
 type Dash = {
   generatedAt: string;
@@ -43,13 +44,20 @@ type Dash = {
 type SortKey = "time" | "patient" | "status" | "type" | "balance";
 
 const shortcuts: Record<string, { to: string; label: string }[]> = {
+  SUPER_ADMIN: [
+    { to: "/patients/new", label: "Add patient" },
+    { to: "/admin/roles", label: "Rights & roles" },
+    { to: "/admin", label: "Clinic settings" },
+  ],
   ADMIN: [
+    { to: "/patients/new", label: "Add patient" },
     { to: "/visits", label: "Today's visits" },
     { to: "/admin", label: "Clinic settings" },
   ],
   RECEPTION: [
     { to: "/patients/new", label: "Register patient" },
-    { to: "/laboratory", label: "Walk-in lab" },
+    { to: "/patients", label: "Patient registry" },
+    { to: "/cashier", label: "Collect payment" },
   ],
   DOCTOR: [{ to: "/consultation", label: "Open consultation" }],
   LAB: [{ to: "/laboratory", label: "Lab queue" }],
@@ -63,6 +71,9 @@ export function DashboardPage() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useUiState("dashboard.filter", "ALL");
   const [sort, setSort] = useUiState<{ key: SortKey; dir: "asc" | "desc" }>("dashboard.sort", { key: "time", dir: "asc" });
+  const [patientQ, setPatientQ] = useState("");
+  const [patientHits, setPatientHits] = useState<Array<{ id: string; patientNumber: string; name: string; phone: string }>>([]);
+  const canRegister = isClinicAdmin(user?.role) || user?.role === "RECEPTION";
 
   async function load() {
     try {
@@ -124,6 +135,53 @@ export function DashboardPage() {
         }
       />
       {error ? <Alert kind="error">{error}</Alert> : null}
+
+      {canRegister ? (
+        <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-800">Patients</h2>
+            <Link to="/patients/new">
+              <Button><Icons.userPlus /> Add new patient</Button>
+            </Link>
+          </div>
+          <form
+            className="flex gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!patientQ.trim()) {
+                setPatientHits([]);
+                return;
+              }
+              try {
+                setPatientHits(await get(`/patients?q=${encodeURIComponent(patientQ.trim())}`));
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Unable to search patients.");
+              }
+            }}
+          >
+            <input
+              className={inputClass}
+              value={patientQ}
+              onChange={(e) => setPatientQ(e.target.value)}
+              placeholder="Search registry by name, phone, or number…"
+            />
+            <Button type="submit" variant="secondary"><Icons.search /> Search</Button>
+            <Link to="/patients"><Button variant="secondary">Full registry</Button></Link>
+          </form>
+          {patientHits.length ? (
+            <ul className="mt-3 divide-y divide-slate-100 text-sm">
+              {patientHits.slice(0, 8).map((p) => (
+                <li key={p.id} className="flex items-center justify-between py-2">
+                  <Link className="font-medium text-[var(--brand)] hover:underline" to={`/patients/${p.id}`}>
+                    {p.patientNumber} · {p.name}
+                  </Link>
+                  <span className="text-slate-500">{p.phone}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       {stats ? (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
           <Stat label="Patients today" value={stats.todaysPatients} onClick={() => setFilter("ALL")} />

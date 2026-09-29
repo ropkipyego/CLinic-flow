@@ -41,3 +41,18 @@ export async function nextReceiptNumber(tx: TxClient, tenantId: string): Promise
   const n = await nextSequence(tx, tenantId, "receipt");
   return `RCP-${pad(n, 6)}`;
 }
+
+export async function nextLpoNumber(tx: TxClient, tenantId: string): Promise<string> {
+  const n = await nextSequence(tx, tenantId, "lpo");
+  return `LPO-${pad(n, 6)}`;
+}
+
+export async function nextGrnNumber(tx: TxClient, tenantId: string): Promise<string> {
+  const n = await nextSequence(tx, tenantId, "grn");
+  return `GRN-${pad(n, 6)}`;
+}
+
+export async function nextStockTakeNumber(tx: TxClient, tenantId: string): Promise<string> {
+  const n = await nextSequence(tx, tenantId, "stock_take");
+  return `STK-${pad(n, 6)}`;
+}

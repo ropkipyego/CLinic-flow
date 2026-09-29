@@ -88,7 +88,7 @@ export async function createEncounter(
 
   if (input.assignedDoctorId) {
     const doctor = await prisma.user.findFirst({
-      where: { id: input.assignedDoctorId, tenantId, role: { in: ["DOCTOR", "ADMIN"] }, active: true },
+      where: { id: input.assignedDoctorId, tenantId, role: { in: ["DOCTOR", "ADMIN", "SUPER_ADMIN"] }, active: true },
     });
     if (!doctor) throw badRequest("Assigned doctor was not found in this clinic.");
   }

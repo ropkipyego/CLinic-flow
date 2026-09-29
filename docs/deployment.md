@@ -11,6 +11,17 @@
 
 Copy `.env.example` to the environment file you need. Development defaults keep `EMAIL_ENABLED=false` and `SMS_ENABLED=false`. Production must set a unique `JWT_SECRET` and must never set `SEED_ON_START=true`.
 
+When the clinic buys a domain, put it in `.env.production`:
+
+```
+FRONTEND_URL=https://your-clinic-domain.com,https://www.your-clinic-domain.com
+APP_URL=https://your-clinic-domain.com
+JWT_SECRET=a-long-random-secret
+SEED_ON_START=false
+```
+
+The production web container listens on port 80 and proxies `/api` and `/health` to the API. Terminate TLS in front of that port (Caddy, nginx, or the registrar HTTPS). CORS only allows the origins listed in `FRONTEND_URL`.
+
 ## Local development without Docker for the API
 
 1. Start PostgreSQL: `docker compose up -d postgres` (host port 5434)

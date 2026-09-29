@@ -22,7 +22,7 @@ describe("ClinicFlow critical workflow", () => {
     const b = await createTenant("tenant-b", "Clinic B");
     tenantA = a.id;
     tenantB = b.id;
-    await createUser(a.id, "ADMIN", "admin.a@test.clinic");
+    await createUser(a.id, "SUPER_ADMIN", "admin.a@test.clinic");
     await createUser(a.id, "RECEPTION", "reception.a@test.clinic");
     await createUser(a.id, "DOCTOR", "doctor.a@test.clinic");
     await createUser(a.id, "LAB", "lab.a@test.clinic");
@@ -214,7 +214,7 @@ describe("ClinicFlow critical workflow", () => {
     const usersOk = await request(app).get("/api/v1/users").set(auth(adminA));
     expect(usersOk.status).toBe(200);
     expect(usersOk.body.data.length).toBe(6);
-    expect(usersOk.body.data.some((u: { role: string; isSuperAdmin: boolean }) => u.role === "ADMIN" && u.isSuperAdmin)).toBe(true);
+    expect(usersOk.body.data.some((u: { role: string; isSuperAdmin: boolean }) => u.role === "SUPER_ADMIN" && u.isSuperAdmin)).toBe(true);
 
     void tenantA;
     void tenantB;

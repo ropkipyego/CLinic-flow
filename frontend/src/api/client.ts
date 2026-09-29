@@ -12,11 +12,13 @@ export class ApiRequestError extends Error {
   status: number;
   code?: string;
   queued?: boolean;
-  constructor(message: string, status: number, code?: string, queued = false) {
+  details?: unknown;
+  constructor(message: string, status: number, code?: string, queued = false, details?: unknown) {
     super(message);
     this.status = status;
     this.code = code;
     this.queued = queued;
+    this.details = details;
   }
 }
 
@@ -65,7 +67,7 @@ export async function api<T>(path: string, init: RequestInit & { skipQueue?: boo
     if (res.status === 401) {
       localStorage.removeItem("clinicflow_token");
     }
-    throw new ApiRequestError(message, res.status, payload?.error?.code);
+    throw new ApiRequestError(message, res.status, payload?.error?.code, false, payload?.error?.details);
   }
   if (method === "GET") cacheSet(path, payload.data);
   return payload.data as T;

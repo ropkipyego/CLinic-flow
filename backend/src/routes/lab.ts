@@ -19,6 +19,9 @@ import {
   upsertLabTest,
   walkInLabSchema,
   createWalkInLabOrder,
+  applyLabCatalog,
+  labPricePatchSchema,
+  updateLabTestPrice,
 } from "../services/labService.js";
 
 export const labRouter = Router();
@@ -32,7 +35,7 @@ labRouter.get(
 
 labRouter.post(
   "/tests",
-  authorize("ADMIN"),
+  authorize("ADMIN", "LAB"),
   asyncHandler(async (req, res) => {
     const body = labTestSchema.parse(req.body);
     return created(res, await upsertLabTest(req.user!.tenantId, req.user!.id, body));
@@ -40,12 +43,26 @@ labRouter.post(
 );
 
 labRouter.patch(
+  "/tests/:id/price",
+  authorize("ADMIN", "LAB"),
+  asyncHandler(async (req, res) =>
+    ok(res, await updateLabTestPrice(req.user!.tenantId, req.user!.id, param(req, "id"), labPricePatchSchema.parse(req.body).price)),
+  ),
+);
+
+labRouter.patch(
   "/tests/:id",
-  authorize("ADMIN"),
+  authorize("ADMIN", "LAB"),
   asyncHandler(async (req, res) => {
     const body = labTestSchema.parse(req.body);
     return ok(res, await upsertLabTest(req.user!.tenantId, req.user!.id, body, param(req, "id")));
   }),
+);
+
+labRouter.post(
+  "/catalog/apply",
+  authorize("ADMIN", "LAB"),
+  asyncHandler(async (req, res) => ok(res, await applyLabCatalog(req.user!.tenantId, req.user!.id))),
 );
 
 labRouter.get(

@@ -6,11 +6,14 @@ import { created, ok } from "../lib/response.js";
 import {
   createPatient,
   createPatientSchema,
+  findPossibleDuplicates,
   getPatient,
+  listPatientRegistry,
   searchPatients,
   updatePatient,
   updatePatientSchema,
 } from "../services/patientService.js";
+import { isClinicAdmin } from "../lib/roles.js";
 import { getPatientProfile } from "../services/patientProfileService.js";
 import { listPatientEncounters } from "../services/encounterService.js";
 
@@ -19,10 +22,38 @@ patientsRouter.use(authenticate);
 
 patientsRouter.get(
   "/",
-  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER"),
+  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"),
   asyncHandler(async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q : undefined;
-    return ok(res, await searchPatients(req.user!.tenantId, q));
+    return ok(res, await searchPatients(req.user!.tenantId, q, 50));
+  }),
+);
+
+patientsRouter.get(
+  "/registry",
+  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"),
+  asyncHandler(async (req, res) => {
+    const q = typeof req.query.q === "string" ? req.query.q : undefined;
+    const sex = typeof req.query.sex === "string" ? req.query.sex : undefined;
+    const page = req.query.page ? Number(req.query.page) : 1;
+    const take = req.query.take ? Number(req.query.take) : 30;
+    return ok(res, await listPatientRegistry(req.user!.tenantId, { q, sex, page, take }));
+  }),
+);
+
+patientsRouter.get(
+  "/matches",
+  authorize("ADMIN", "RECEPTION"),
+  asyncHandler(async (req, res) => {
+    return ok(
+      res,
+      await findPossibleDuplicates(req.user!.tenantId, {
+        phone: typeof req.query.phone === "string" ? req.query.phone : undefined,
+        firstName: typeof req.query.firstName === "string" ? req.query.firstName : undefined,
+        lastName: typeof req.query.lastName === "string" ? req.query.lastName : undefined,
+        dateOfBirth: typeof req.query.dateOfBirth === "string" ? req.query.dateOfBirth : undefined,
+      }),
+    );
   }),
 );
 
@@ -45,14 +76,14 @@ patientsRouter.get(
   "/:id/profile",
   authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"),
   asyncHandler(async (req, res) => {
-    const canSeeFinance = ["ADMIN", "CASHIER"].includes(req.user!.role);
+    const canSeeFinance = isClinicAdmin(req.user!.role) || ["CASHIER", "RECEPTION"].includes(req.user!.role);
     return ok(res, await getPatientProfile(req.user!.tenantId, param(req, "id"), canSeeFinance));
   }),
 );
 
 patientsRouter.get(
   "/:id/encounters",
-  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER"),
+  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"),
   asyncHandler(async (req, res) => ok(res, await listPatientEncounters(req.user!.tenantId, param(req, "id")))),
 );
 

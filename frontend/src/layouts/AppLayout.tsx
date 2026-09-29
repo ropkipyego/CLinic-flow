@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth, type Role } from "../auth/AuthContext";
+import { isClinicAdmin } from "../lib/roles";
 import { Icons } from "../components/icons";
 import { ClinicLogo } from "../branding/ClinicLogo";
 import { SyncBanner } from "../offline/SyncBanner";
@@ -14,31 +15,36 @@ type NavItem = {
 };
 
 const CARE: NavItem[] = [
-  { to: "/", label: "Dashboard", roles: ["ADMIN", "RECEPTION", "DOCTOR", "LAB", "PHARMACY", "CASHIER"], icon: "dashboard" },
-  { to: "/patients", label: "Patients", roles: ["ADMIN", "RECEPTION", "DOCTOR", "CASHIER"], icon: "patients" },
-  { to: "/visits", label: "Visits", roles: ["ADMIN", "RECEPTION", "DOCTOR"], icon: "visits" },
-  { to: "/consultation", label: "Consultation", roles: ["ADMIN", "DOCTOR"], icon: "consultation" },
+  { to: "/", label: "Dashboard", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION", "DOCTOR", "LAB", "PHARMACY", "CASHIER"], icon: "dashboard" },
+  { to: "/patients", label: "Patients", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"], icon: "patients" },
+  { to: "/visits", label: "Visits", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION", "DOCTOR"], icon: "visits" },
+  { to: "/consultation", label: "Consultation", roles: ["SUPER_ADMIN", "ADMIN", "DOCTOR"], icon: "consultation" },
 ];
 
 const OPERATIONS: NavItem[] = [
-  { to: "/laboratory", label: "Laboratory", roles: ["ADMIN", "LAB", "DOCTOR", "RECEPTION"], icon: "lab" },
-  { to: "/pharmacy", label: "Pharmacy", roles: ["ADMIN", "PHARMACY"], icon: "pharmacy" },
-  { to: "/cashier", label: "Cashier", roles: ["ADMIN", "CASHIER"], icon: "cashier" },
+  { to: "/laboratory", label: "Laboratory", roles: ["SUPER_ADMIN", "ADMIN", "LAB", "DOCTOR", "RECEPTION"], icon: "lab" },
+  { to: "/pharmacy", label: "Pharmacy", roles: ["SUPER_ADMIN", "ADMIN", "PHARMACY"], icon: "pharmacy" },
+  { to: "/cashier", label: "Cashier", roles: ["SUPER_ADMIN", "ADMIN", "CASHIER", "RECEPTION"], icon: "cashier" },
 ];
 
 const ADMIN: NavItem[] = [
-  { to: "/reports", label: "Reports", roles: ["ADMIN"], icon: "reports" },
-  { to: "/sms", label: "SMS", roles: ["ADMIN"], icon: "sms" },
-  { to: "/admin", label: "Administration", roles: ["ADMIN"], icon: "admin" },
+  { to: "/admin/prices", label: "Price list", roles: ["SUPER_ADMIN", "ADMIN"], icon: "cash" },
+  { to: "/reports", label: "Reports", roles: ["SUPER_ADMIN", "ADMIN"], icon: "reports" },
+  { to: "/sms", label: "SMS", roles: ["SUPER_ADMIN", "ADMIN"], icon: "sms" },
+  { to: "/admin/roles", label: "Rights & roles", roles: ["SUPER_ADMIN", "ADMIN"], icon: "admin" },
+  { to: "/admin", label: "Administration", roles: ["SUPER_ADMIN", "ADMIN"], icon: "admin" },
 ];
 
 function visible(items: NavItem[], role: Role) {
-  return items.filter((n) => role === "ADMIN" || n.roles.includes(role));
+  return items.filter((n) => isClinicAdmin(role) || n.roles.includes(role));
 }
 
 function pageTitle(pathname: string) {
   if (pathname.startsWith("/patients/new")) return "Register patient";
+  if (pathname.endsWith("/edit")) return "Edit patient";
   if (pathname.startsWith("/patients/")) return "Patient";
+  if (pathname.startsWith("/admin/roles")) return "Rights & roles";
+  if (pathname.startsWith("/admin/prices")) return "Price list";
   if (pathname.startsWith("/consultation")) return "Consultation";
   if (pathname.startsWith("/cashier/receipts")) return "Receipt";
   const map: Record<string, string> = {
@@ -51,6 +57,8 @@ function pageTitle(pathname: string) {
     "/reports": "Reports",
     "/sms": "SMS",
     "/admin": "Administration",
+    "/admin/roles": "Rights & roles",
+    "/admin/prices": "Price list",
   };
   return map[pathname] || "ClinicFlow";
 }

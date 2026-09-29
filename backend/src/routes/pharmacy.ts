@@ -18,6 +18,11 @@ import {
   listStockMovements,
   otcSaleSchema,
   sellOtc,
+  applyPharmacyCatalog,
+  importMedicines,
+  importMedicinesSchema,
+  sellingPricePatchSchema,
+  updateMedicineSellingPrice,
 } from "../services/pharmacyService.js";
 
 export const pharmacyRouter = Router();
@@ -27,7 +32,14 @@ pharmacyRouter.get(
   "/medicines",
   authorize("ADMIN", "PHARMACY", "DOCTOR"),
   asyncHandler(async (req, res) =>
-    ok(res, await listMedicines(req.user!.tenantId, { lowStock: req.query.lowStock === "true", activeOnly: req.query.active === "true" })),
+    ok(
+      res,
+      await listMedicines(req.user!.tenantId, {
+        lowStock: req.query.lowStock === "true",
+        activeOnly: req.query.active === "true",
+        q: typeof req.query.q === "string" ? req.query.q : undefined,
+      }),
+    ),
   ),
 );
 
@@ -38,6 +50,22 @@ pharmacyRouter.post(
     const body = medicineSchema.parse(req.body);
     return created(res, await upsertMedicine(req.user!.tenantId, req.user!.id, body));
   }),
+);
+
+pharmacyRouter.patch(
+  "/medicines/:id/price",
+  authorize("ADMIN", "PHARMACY"),
+  asyncHandler(async (req, res) =>
+    ok(
+      res,
+      await updateMedicineSellingPrice(
+        req.user!.tenantId,
+        req.user!.id,
+        param(req, "id"),
+        sellingPricePatchSchema.parse(req.body).sellingPrice,
+      ),
+    ),
+  ),
 );
 
 pharmacyRouter.patch(
@@ -89,6 +117,20 @@ pharmacyRouter.post(
     const body = otcSaleSchema.parse(req.body);
     return created(res, await sellOtc(req.user!.tenantId, req.user!.id, req.user!.role, body, req.ip));
   }),
+);
+
+pharmacyRouter.post(
+  "/catalog/apply",
+  authorize("ADMIN", "PHARMACY"),
+  asyncHandler(async (req, res) => ok(res, await applyPharmacyCatalog(req.user!.tenantId, req.user!.id))),
+);
+
+pharmacyRouter.post(
+  "/medicines/import",
+  authorize("ADMIN", "PHARMACY"),
+  asyncHandler(async (req, res) =>
+    created(res, await importMedicines(req.user!.tenantId, req.user!.id, importMedicinesSchema.parse(req.body))),
+  ),
 );
 
 export const inventoryRouter = Router();

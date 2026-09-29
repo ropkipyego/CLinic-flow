@@ -24,7 +24,7 @@ encountersRouter.use(authenticate);
 
 encountersRouter.get(
   "/",
-  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER"),
+  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"),
   asyncHandler(async (req, res) => ok(res, await listTodayEncounters(req.user!.tenantId))),
 );
 
@@ -44,7 +44,7 @@ encountersRouter.get(
   asyncHandler(async (req, res) => {
     const { prisma } = await import("../lib/prisma.js");
     const doctors = await prisma.user.findMany({
-      where: { tenantId: req.user!.tenantId, role: { in: ["DOCTOR", "ADMIN"] }, active: true },
+      where: { tenantId: req.user!.tenantId, role: { in: ["DOCTOR", "ADMIN", "SUPER_ADMIN"] }, active: true },
       select: { id: true, firstName: true, lastName: true, role: true },
       orderBy: { lastName: "asc" },
     });

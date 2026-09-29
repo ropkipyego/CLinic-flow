@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { get, post, put } from "../../api/client";
 import { Alert, Button, Empty, Field, PageHeader, Panel, StatusBadge, Table, cellClass, inputClass } from "../../components/ui";
+import { MedicineSelect } from "../../components/MedicinePicker";
 
 export function ConsultationPage() {
   const { encounterId } = useParams();
@@ -236,10 +237,7 @@ export function ConsultationPage() {
               <h3 className="mb-3 text-sm font-semibold text-slate-800">Prescription</h3>
               <form onSubmit={prescribe} className="grid gap-3 md:grid-cols-3">
               <Field label="Medicine">
-                <select className={inputClass} value={rx.medicineId} onChange={(e) => setRx((s) => ({ ...s, medicineId: e.target.value }))} required>
-                  <option value="">Select</option>
-                  {meds.map((m) => <option key={m.id} value={m.id}>{m.name} {m.strength}</option>)}
-                </select>
+                <MedicineSelect medicines={meds} value={rx.medicineId} onChange={(id) => setRx((s) => ({ ...s, medicineId: id }))} required />
               </Field>
               <Field label="Dose"><input className={inputClass} value={rx.dose} onChange={(e) => setRx((s) => ({ ...s, dose: e.target.value }))} /></Field>
               <Field label="Frequency"><input className={inputClass} value={rx.frequency} onChange={(e) => setRx((s) => ({ ...s, frequency: e.target.value }))} /></Field>
