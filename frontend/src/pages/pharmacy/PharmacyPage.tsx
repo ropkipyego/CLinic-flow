@@ -2,20 +2,17 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { get, post } from "../../api/client";
 import { Alert, Button, Empty, Field, PageHeader, StatusBadge, Table, inputClass } from "../../components/ui";
 import { Icons } from "../../components/icons";
-import { useAuth } from "../../auth/AuthContext";
 import { useUiState } from "../../lib/uiState";
 import { emptyWalkInClient, WalkInClientFields, walkInPayload } from "../../components/WalkInClientFields";
 import { MedicineSelect } from "../../components/MedicinePicker";
 import { ApiRequestError } from "../../api/client";
-import { isClinicAdmin } from "../../lib/roles";
 import { StockItemsPanel } from "./StockItemsPanel";
 import { StockImportPanel } from "./StockImportPanel";
 import { PurchaseOrderPanel } from "./PurchaseOrderPanel";
 import { StockTakePanel } from "./StockTakePanel";
 
 export function PharmacyPage() {
-  const { user } = useAuth();
-  const [tab, setTab] = useUiState<"queue" | "otc" | "stock" | "items" | "import" | "lpo" | "take">("pharmacy.tab", "stock");
+  const [tab, setTab] = useUiState<"queue" | "otc" | "stock" | "items" | "import" | "lpo" | "take">("pharmacy.tab", "queue");
   const [queue, setQueue] = useState<any[]>([]);
   const [meds, setMeds] = useState<any[]>([]);
   const [movements, setMovements] = useState<any[]>([]);
@@ -117,15 +114,6 @@ export function PharmacyPage() {
     }
   }
 
-  async function applyCatalog() {
-    try {
-      const result = await post<{ created: number; updated: number; total: number }>("/pharmacy/catalog/apply", {});
-      setOk(`Clinic drug list applied: ${result.total} items (${result.created} new, ${result.updated} updated). Receive stock next.`);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to apply the clinic drug list.");
-    }
-  }
 
   const forms = useMemo(() => ["ALL", ...Array.from(new Set(meds.map((m) => m.dosageForm).filter(Boolean))).sort()], [meds]);
   const visibleMeds = useMemo(() => {
@@ -146,12 +134,12 @@ export function PharmacyPage() {
         subtitle="Items, import, LPO → GRN receive, stock take, dispense, or OTC."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button variant={tab === "stock" ? "primary" : "secondary"} onClick={() => setTab("stock")}>Receive / adjust</Button>
-            <Button variant={tab === "items" ? "primary" : "secondary"} onClick={() => setTab("items")}>Items</Button>
-            <Button variant={tab === "import" ? "primary" : "secondary"} onClick={() => setTab("import")}>Import</Button>
-            <Button variant={tab === "lpo" ? "primary" : "secondary"} onClick={() => setTab("lpo")}>LPO / receive</Button>
-            <Button variant={tab === "take" ? "primary" : "secondary"} onClick={() => setTab("take")}>Stock take</Button>
             <Button variant={tab === "queue" ? "primary" : "secondary"} onClick={() => setTab("queue")}>Queue</Button>
+            <Button variant={tab === "stock" ? "primary" : "secondary"} onClick={() => setTab("stock")}>Store</Button>
+            <Button variant={tab === "items" ? "primary" : "secondary"} onClick={() => setTab("items")}>Catalogue</Button>
+            <Button variant={tab === "lpo" ? "primary" : "secondary"} onClick={() => setTab("lpo")}>Procurement</Button>
+            <Button variant={tab === "take" ? "primary" : "secondary"} onClick={() => setTab("take")}>Stock take</Button>
+            <Button variant={tab === "import" ? "primary" : "secondary"} onClick={() => setTab("import")}>CSV import</Button>
             <Button variant={tab === "otc" ? "primary" : "secondary"} onClick={() => setTab("otc")}>
               <Icons.pill /> OTC sale
             </Button>
@@ -227,9 +215,6 @@ export function PharmacyPage() {
           <form onSubmit={adjust} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-slate-800">Receive or adjust stock</h2>
-              {(isClinicAdmin(user?.role) || user?.role === "PHARMACY") ? (
-                <Button variant="secondary" onClick={() => void applyCatalog()}>Apply clinic drug list</Button>
-              ) : null}
             </div>
             <p className="text-sm text-slate-500">
               The list is the clinic stock sheet. New items start at 0. Receive purchases here before dispensing or OTC.

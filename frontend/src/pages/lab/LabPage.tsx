@@ -26,7 +26,7 @@ export function LabPage() {
   const [editingTest, setEditingTest] = useState<string | null>(null);
   const canResults = isClinicAdmin(user?.role) || user?.role === "LAB";
   const canWalkIn = isClinicAdmin(user?.role) || user?.role === "LAB" || user?.role === "RECEPTION";
-  const canCatalog = isClinicAdmin(user?.role) || user?.role === "LAB";
+  const canCatalog = isClinicAdmin(user?.role);
 
   async function load() {
     try {
@@ -109,13 +109,15 @@ export function LabPage() {
     }
   }
 
-  async function applyLabList() {
+  async function verifyResult(resultId: string) {
     try {
-      const result = await post<{ created: number; updated: number; total: number }>("/lab/catalog/apply", {});
-      setOk(`Lab price list applied: ${result.total} tests (${result.created} new, ${result.updated} updated).`);
+      await post(`/lab/results/${resultId}/verify`, {});
+      const refreshed = await get(`/lab/orders/${selected.id}`);
+      setSelected(refreshed);
+      setOk("Result verified. The doctor has been notified.");
       await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to apply the lab list.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to verify result.");
     }
   }
 
@@ -146,9 +148,8 @@ export function LabPage() {
               <h2 className="text-sm font-semibold">Add a laboratory test</h2>
               <div className="flex flex-wrap gap-2">
                 <Link className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50" to="/admin/prices">
-                  Search prices
+                  Price list
                 </Link>
-                <Button variant="secondary" onClick={() => void applyLabList()}>Apply clinic lab list</Button>
               </div>
             </div>
             <div className="grid gap-2 md:grid-cols-4">
@@ -252,7 +253,10 @@ export function LabPage() {
             <div key={item.id} className="mb-3 grid gap-2 md:grid-cols-[1fr_1fr_auto]">
               <div className="text-sm">{item.labTest.name} {item.labTest.referenceRange ? `(${item.labTest.referenceRange})` : ""}</div>
               {item.result ? (
-                <div className="text-sm">Result: {item.result.valueText ?? item.result.valueNumeric}</div>
+                <div className="text-sm">
+                  Result: {item.result.valueText ?? item.result.valueNumeric}
+                  {item.result.verifiedAt ? " · verified" : " · draft"}
+                </div>
               ) : canResults ? (
                 <Field label="Result">
                   {item.labTest.resultType === "POSITIVE_NEGATIVE" || item.labTest.resultType === "SELECT" ? (
@@ -268,6 +272,7 @@ export function LabPage() {
                 <p className="text-sm text-slate-500">Waiting for laboratory to enter this result.</p>
               )}
               {canResults && !item.result ? <div className="self-end"><Button onClick={() => void saveResult(item)}>Save result</Button></div> : null}
+              {canResults && item.result && !item.result.verifiedAt ? <div className="self-end"><Button onClick={() => void verifyResult(item.result.id)}>Verify</Button></div> : null}
             </div>
           ))}
         </div>

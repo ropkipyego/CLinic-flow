@@ -9,6 +9,7 @@ export function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -66,7 +67,24 @@ export function LoginPage() {
             <input className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="username" required />
           </Field>
           <Field label="Password">
-            <input className={inputClass} value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="current-password" required />
+            <div className="relative">
+              <input
+                className={`${inputClass} pr-16`}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                required
+              />
+              <button
+                type="button"
+                className="absolute inset-y-0 right-2 text-xs font-medium text-slate-600"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
           </Field>
           <Button type="submit" disabled={busy}>
             {busy ? "Signing in…" : "Sign in"}

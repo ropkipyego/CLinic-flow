@@ -7,6 +7,7 @@ import { CLINIC_LAB_TESTS } from "../data/labCatalog.js";
 import { money, toNumber } from "../lib/serialize.js";
 import { createChargeInTx } from "./billingService.js";
 import { refreshEncounterStatus } from "./encounterService.js";
+import { notifyUsers } from "./notificationService.js";
 import { createWalkInEncounter, findOrCreateWalkInPatient, walkInClientSchema } from "./walkInService.js";
 
 export const labTestSchema = z.object({
@@ -470,7 +471,106 @@ export async function saveLabResult(
     return saved;
   });
 
-  return { ...result, valueNumeric: toNumber(result.valueNumeric) };
+  return { ...result, valueNumeric: toNumber(result.valueNumeric), verifiedAt: result.verifiedAt };
+}
+
+export async function verifyLabResult(tenantId: string, actorId: string, resultId: string, ip?: string) {
+  const existing = await prisma.labResult.findFirst({
+    where: { id: resultId, tenantId },
+    include: {
+      labTest: true,
+      patient: true,
+      encounter: { include: { assignedDoctor: true } },
+      performedBy: true,
+    },
+  });
+  if (!existing) throw notFound("Laboratory result not found.");
+  if (existing.verifiedAt) {
+    return { ...existing, valueNumeric: toNumber(existing.valueNumeric), replayed: true as const };
+  }
+
+  const verified = await prisma.labResult.update({
+    where: { id: resultId },
+    data: { verifiedAt: new Date(), verifiedById: actorId },
+    include: {
+      labTest: true,
+      patient: true,
+      encounter: true,
+      performedBy: true,
+      verifiedBy: true,
+    },
+  });
+  await writeAudit({
+    tenantId,
+    userId: actorId,
+    action: "lab_result.verified",
+    entity: "lab_result",
+    entityId: verified.id,
+    metadata: { labTestId: existing.labTestId },
+    ipAddress: ip,
+  });
+
+  const doctors = existing.encounter.assignedDoctorId
+    ? [existing.encounter.assignedDoctorId]
+    : (
+        await prisma.user.findMany({
+          where: { tenantId, role: "DOCTOR", active: true },
+          select: { id: true },
+        })
+      ).map((u) => u.id);
+  const patientName = [existing.patient.firstName, existing.patient.lastName].filter(Boolean).join(" ");
+  await notifyUsers({
+    tenantId,
+    userIds: doctors,
+    type: "LAB_RESULT_VERIFIED",
+    title: `${existing.labTest.name} ready`,
+    body: `${patientName} · ${existing.encounter.visitNumber} · verified`,
+    href: `/consultation/${existing.encounterId}?tab=results`,
+    entityId: verified.id,
+  });
+  return { ...verified, valueNumeric: toNumber(verified.valueNumeric), replayed: false as const };
+}
+
+export async function labResultDocument(tenantId: string, resultId: string) {
+  const result = await prisma.labResult.findFirst({
+    where: { id: resultId, tenantId },
+    include: {
+      labTest: true,
+      patient: true,
+      encounter: true,
+      performedBy: true,
+      verifiedBy: true,
+      tenant: true,
+      labOrder: true,
+    },
+  });
+  if (!result) throw notFound("Laboratory result not found.");
+  return {
+    final: Boolean(result.verifiedAt),
+    clinic: {
+      name: result.tenant.name,
+      phone: result.tenant.phone,
+      email: result.tenant.email,
+      address: result.tenant.address,
+      logoUrl: result.tenant.logoUrl,
+    },
+    patient: {
+      name: [result.patient.firstName, result.patient.middleName, result.patient.lastName].filter(Boolean).join(" "),
+      patientNumber: result.patient.patientNumber,
+    },
+    visitNumber: result.encounter.visitNumber,
+    orderId: result.labOrderId,
+    testName: result.labTest.name,
+    result: result.valueText ?? (result.valueNumeric != null ? String(toNumber(result.valueNumeric)) : ""),
+    unit: result.labTest.resultType === "NUMERIC" ? result.labTest.referenceRange : null,
+    referenceRange: result.labTest.referenceRange,
+    flag: result.flag,
+    notes: result.notes,
+    completedAt: result.createdAt,
+    verifiedAt: result.verifiedAt,
+    performedBy: `${result.performedBy.firstName} ${result.performedBy.lastName}`,
+    verifiedBy: result.verifiedBy ? `${result.verifiedBy.firstName} ${result.verifiedBy.lastName}` : null,
+  };
 }
 
 export async function patientLabResults(tenantId: string, patientId: string) {

@@ -16,6 +16,7 @@ import { procurementRouter } from "./routes/procurement.js";
 import { chargesRouter, paymentsRouter, receiptsRouter, servicesRouter } from "./routes/billing.js";
 import { reportsRouter } from "./routes/reports.js";
 import { auditRouter, emailRouter, smsRouter } from "./routes/comms.js";
+import { notificationsRouter } from "./routes/notifications.js";
 
 export function createApp() {
   const app = express();
@@ -68,6 +69,7 @@ export function createApp() {
   api.use("/sms", smsRouter);
   api.use("/email", emailRouter);
   api.use("/audit", auditRouter);
+  api.use("/notifications", notificationsRouter);
 
   app.use(env.apiPrefix, api);
   app.use(notFoundHandler);

@@ -55,6 +55,9 @@ export const stockTakeCountSchema = z.object({
     z.object({
       medicineId: z.string().uuid(),
       countedQty: z.number().int().nonnegative(),
+      batchNumber: z.string().optional().nullable(),
+      expiryDate: z.string().optional().nullable(),
+      notes: z.string().optional().nullable(),
     }),
   ),
 });
@@ -403,7 +406,13 @@ export async function saveStockTakeCounts(
       if (!existing) continue;
       await tx.stockTakeLine.update({
         where: { id: existing.id },
-        data: { countedQty: line.countedQty, variance: line.countedQty - existing.systemQty },
+        data: {
+          countedQty: line.countedQty,
+          variance: line.countedQty - existing.systemQty,
+          batchNumber: line.batchNumber ?? existing.batchNumber,
+          expiryDate: line.expiryDate ? new Date(line.expiryDate) : existing.expiryDate,
+          notes: line.notes ?? existing.notes,
+        },
       });
     }
   });

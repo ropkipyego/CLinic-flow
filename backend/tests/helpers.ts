@@ -9,6 +9,8 @@ export const app = createApp();
 export async function resetDb() {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "InboxNotification",
+      "CatalogueImportMap",
       "SmsMessage",
       "SmsCampaign",
       "EmailRecord",
@@ -121,5 +123,34 @@ export async function seedCatalog(tenantId: string) {
       quantityOnHand: 100,
     },
   });
-  return { consult, malaria, para };
+  const amox = await prisma.medicine.create({
+    data: {
+      tenantId,
+      name: "Amoxicillin",
+      genericName: "Amoxicillin",
+      strength: "500mg",
+      dosageForm: "Capsule",
+      unit: "cap",
+      sku: "AMOX500",
+      sellingPrice: 20,
+      costPrice: 8,
+      reorderLevel: 20,
+      quantityOnHand: 50,
+    },
+  });
+  const cbcService = await prisma.service.create({
+    data: { tenantId, name: "CBC", code: "CBC", category: "LABORATORY", price: 800 },
+  });
+  const cbc = await prisma.labTest.create({
+    data: {
+      tenantId,
+      name: "CBC",
+      code: "CBC",
+      category: "HAEMATOLOGY",
+      price: 800,
+      resultType: "NUMERIC",
+      serviceId: cbcService.id,
+    },
+  });
+  return { consult, malaria, para, amox, cbc };
 }

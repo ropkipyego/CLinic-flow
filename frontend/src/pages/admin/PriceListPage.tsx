@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { get, patch, post } from "../../api/client";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { get, patch } from "../../api/client";
 import { Alert, Button, PageHeader, inputClass } from "../../components/ui";
 import { Icons } from "../../components/icons";
 import { formatMoney } from "../../lib/labels";
@@ -44,7 +44,6 @@ export function PriceListPage() {
   const [ok, setOk] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
-  const [applying, setApplying] = useState(false);
   const drafts = useRef<Record<string, string>>({});
   const [, bump] = useState(0);
 
@@ -152,36 +151,11 @@ export function PriceListPage() {
     }
   }
 
-  async function applyPrinted(e?: FormEvent) {
-    e?.preventDefault();
-    setApplying(true);
-    setError("");
-    try {
-      const jobs: Promise<unknown>[] = [];
-      if (tab === "all" || tab === "hospital") jobs.push(post("/services/catalog/apply"));
-      if (tab === "all" || tab === "lab") jobs.push(post("/lab/catalog/apply"));
-      if (tab === "all" || tab === "pharmacy") jobs.push(post("/pharmacy/catalog/apply"));
-      await Promise.all(jobs);
-      drafts.current = {};
-      await load();
-      setOk("Printed price list applied. You can still search and change any amount.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to apply the printed list.");
-    } finally {
-      setApplying(false);
-    }
-  }
-
   return (
     <div className="space-y-4">
       <PageHeader
         title="Price list"
-        subtitle="Search any hospital charge, lab test, or medicine and change the KES amount. New visits pick up the new price immediately."
-        actions={
-          <Button variant="secondary" onClick={() => void applyPrinted()} disabled={applying}>
-            {applying ? "Applying…" : tab === "all" ? "Apply printed lists" : "Reset tab to printed prices"}
-          </Button>
-        }
+        subtitle="Search any hospital charge, lab test, or medicine and change the KES amount. New visits pick up the new price immediately. Historical bills keep the price recorded at the time of charging."
       />
       {error ? <Alert kind="error">{error}</Alert> : null}
       {ok ? <Alert kind="success">{ok}</Alert> : null}

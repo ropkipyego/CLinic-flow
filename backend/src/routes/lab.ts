@@ -15,11 +15,12 @@ import {
   listLabTests,
   patientLabResults,
   saveLabResult,
+  verifyLabResult,
+  labResultDocument,
   updateLabOrderStatus,
   upsertLabTest,
   walkInLabSchema,
   createWalkInLabOrder,
-  applyLabCatalog,
   labPricePatchSchema,
   updateLabTestPrice,
 } from "../services/labService.js";
@@ -35,7 +36,7 @@ labRouter.get(
 
 labRouter.post(
   "/tests",
-  authorize("ADMIN", "LAB"),
+  authorize("ADMIN"),
   asyncHandler(async (req, res) => {
     const body = labTestSchema.parse(req.body);
     return created(res, await upsertLabTest(req.user!.tenantId, req.user!.id, body));
@@ -44,7 +45,7 @@ labRouter.post(
 
 labRouter.patch(
   "/tests/:id/price",
-  authorize("ADMIN", "LAB"),
+  authorize("ADMIN"),
   asyncHandler(async (req, res) =>
     ok(res, await updateLabTestPrice(req.user!.tenantId, req.user!.id, param(req, "id"), labPricePatchSchema.parse(req.body).price)),
   ),
@@ -52,18 +53,13 @@ labRouter.patch(
 
 labRouter.patch(
   "/tests/:id",
-  authorize("ADMIN", "LAB"),
+  authorize("ADMIN"),
   asyncHandler(async (req, res) => {
     const body = labTestSchema.parse(req.body);
     return ok(res, await upsertLabTest(req.user!.tenantId, req.user!.id, body, param(req, "id")));
   }),
 );
 
-labRouter.post(
-  "/catalog/apply",
-  authorize("ADMIN", "LAB"),
-  asyncHandler(async (req, res) => ok(res, await applyLabCatalog(req.user!.tenantId, req.user!.id))),
-);
 
 labRouter.get(
   "/queue",
@@ -114,6 +110,18 @@ labRouter.post(
     const body = labResultSchema.parse(req.body);
     return created(res, await saveLabResult(req.user!.tenantId, req.user!.id, param(req, "itemId"), body, req.ip));
   }),
+);
+
+labRouter.post(
+  "/results/:id/verify",
+  authorize("ADMIN", "LAB"),
+  asyncHandler(async (req, res) => ok(res, await verifyLabResult(req.user!.tenantId, req.user!.id, param(req, "id"), req.ip))),
+);
+
+labRouter.get(
+  "/results/:id/document",
+  authorize("ADMIN", "LAB", "DOCTOR"),
+  asyncHandler(async (req, res) => ok(res, await labResultDocument(req.user!.tenantId, param(req, "id")))),
 );
 
 labRouter.get(

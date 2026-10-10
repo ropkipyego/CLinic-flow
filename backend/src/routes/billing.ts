@@ -4,7 +4,6 @@ import { param } from "../lib/params.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 import { created, ok } from "../lib/response.js";
 import {
-  applyHospitalCatalog,
   getService,
   listServiceCategories,
   listServices,
@@ -39,11 +38,6 @@ servicesRouter.get(
   asyncHandler(async (_req, res) => ok(res, listServiceCategories())),
 );
 
-servicesRouter.post(
-  "/catalog/apply",
-  authorize("ADMIN"),
-  asyncHandler(async (req, res) => ok(res, await applyHospitalCatalog(req.user!.tenantId, req.user!.id))),
-);
 
 servicesRouter.post(
   "/",
@@ -92,20 +86,23 @@ chargesRouter.post(
 );
 
 export const paymentsRouter = Router();
-paymentsRouter.use(authenticate, authorize("ADMIN", "CASHIER", "RECEPTION"));
+paymentsRouter.use(authenticate);
 
 paymentsRouter.get(
   "/today",
+  authorize("ADMIN", "CASHIER", "RECEPTION"),
   asyncHandler(async (req, res) => ok(res, await cashierToday(req.user!.tenantId))),
 );
 
 paymentsRouter.get(
   "/encounters/:encounterId",
+  authorize("ADMIN", "CASHIER", "RECEPTION"),
   asyncHandler(async (req, res) => ok(res, await encounterBilling(req.user!.tenantId, param(req, "encounterId")))),
 );
 
 paymentsRouter.post(
   "/encounters/:encounterId",
+  authorize("ADMIN", "CASHIER"),
   asyncHandler(async (req, res) => {
     const body = receivePaymentSchema.parse(req.body);
     const result = await receivePayment(req.user!.tenantId, req.user!.id, param(req, "encounterId"), body, req.ip);

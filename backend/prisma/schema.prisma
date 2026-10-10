@@ -182,10 +182,12 @@ model Tenant {
   suppliers          Supplier[]
   purchaseOrders     PurchaseOrder[]
   purchaseOrderLines PurchaseOrderLine[]
-  goodsReceipts      GoodsReceipt[]
-  goodsReceiptLines  GoodsReceiptLine[]
-  stockTakes         StockTake[]
-  stockTakeLines     StockTakeLine[]
+  goodsReceipts       GoodsReceipt[]
+  goodsReceiptLines   GoodsReceiptLine[]
+  stockTakes          StockTake[]
+  stockTakeLines      StockTakeLine[]
+  inboxNotifications  InboxNotification[]
+  catalogueImportMaps CatalogueImportMap[]
 }
 
 model User {
@@ -220,6 +222,8 @@ model User {
   purchaseOrders      PurchaseOrder[]      @relation("PurchaseOrderCreatedBy")
   goodsReceipts       GoodsReceipt[]       @relation("GoodsReceiptReceivedBy")
   stockTakes          StockTake[]          @relation("StockTakeCountedBy")
+  verifiedLabResults  LabResult[]          @relation("LabResultVerifiedBy")
+  inboxNotifications  InboxNotification[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -480,6 +484,8 @@ model LabResult {
   labOrderItemId String   @unique
   labTestId      String
   performedById  String
+  verifiedAt     DateTime?
+  verifiedById   String?
   valueText      String?
   valueNumeric   Decimal? @db.Decimal(12, 3)
   flag           String?
@@ -494,6 +500,7 @@ model LabResult {
   labOrderItem LabOrderItem @relation(fields: [labOrderItemId], references: [id], onDelete: Cascade)
   labTest      LabTest      @relation(fields: [labTestId], references: [id])
   performedBy  User         @relation(fields: [performedById], references: [id])
+  verifiedBy   User?        @relation("LabResultVerifiedBy", fields: [verifiedById], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, encounterId])
@@ -508,6 +515,7 @@ model Medicine {
   dosageForm     String?
   unit           String   @default("unit")
   sku            String
+  category       String?
   sellingPrice   Decimal  @db.Decimal(12, 2)
   costPrice      Decimal  @db.Decimal(12, 2)
   reorderLevel   Int      @default(10)
@@ -522,8 +530,9 @@ model Medicine {
   dispenseItems     DispenseItem[]
   charges           Charge[]
   purchaseOrderLines PurchaseOrderLine[]
-  goodsReceiptLines  GoodsReceiptLine[]
-  stockTakeLines     StockTakeLine[]
+  goodsReceiptLines   GoodsReceiptLine[]
+  stockTakeLines      StockTakeLine[]
+  catalogueImportMaps CatalogueImportMap[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
@@ -552,15 +561,16 @@ model StockMovement {
 }
 
 model Prescription {
-  id          String             @id @default(uuid())
-  tenantId    String
-  encounterId String
-  patientId   String
-  doctorId    String
-  status      PrescriptionStatus @default(PENDING)
-  notes       String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  id              String             @id @default(uuid())
+  tenantId        String
+  encounterId     String
+  patientId       String
+  doctorId        String
+  treatmentNumber String?
+  status          PrescriptionStatus @default(PENDING)
+  notes           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   tenant    Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   encounter Encounter          @relation(fields: [encounterId], references: [id], onDelete: Cascade)
@@ -569,6 +579,7 @@ model Prescription {
   items     PrescriptionItem[]
   dispenses Dispense[]
 
+  @@unique([tenantId, treatmentNumber])
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, encounterId])
@@ -925,13 +936,16 @@ model StockTake {
 }
 
 model StockTakeLine {
-  id          String @id @default(uuid())
+  id          String    @id @default(uuid())
   tenantId    String
   stockTakeId String
   medicineId  String
   systemQty   Int
   countedQty  Int?
-  variance    Int    @default(0)
+  variance    Int       @default(0)
+  batchNumber String?
+  expiryDate  DateTime? @db.Date
+  notes       String?
 
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   stockTake StockTake @relation(fields: [stockTakeId], references: [id], onDelete: Cascade)
@@ -940,4 +954,38 @@ model StockTakeLine {
   @@index([tenantId])
   @@index([stockTakeId])
   @@unique([stockTakeId, medicineId])
+}
+
+model InboxNotification {
+  id        String    @id @default(uuid())
+  tenantId  String
+  userId    String
+  type      String
+  title     String
+  body      String
+  href      String?
+  entityId  String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, type, entityId])
+  @@index([tenantId, userId, createdAt])
+}
+
+model CatalogueImportMap {
+  id         String   @id @default(uuid())
+  tenantId   String
+  sourceKey  String
+  medicineId String
+  sourceName String
+  createdAt  DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, sourceKey])
+  @@index([tenantId])
 }

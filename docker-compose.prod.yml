@@ -32,7 +32,7 @@ services:
     expose:
       - "4000"
     restart: unless-stopped
-    command: sh -c "npx prisma migrate deploy && node dist/src/index.js"
+    command: node dist/src/index.js
 
   worker:
     build:

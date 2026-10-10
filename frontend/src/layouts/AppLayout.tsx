@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, type Role } from "../auth/AuthContext";
 import { isClinicAdmin } from "../lib/roles";
+import { get, post } from "../api/client";
 import { Icons } from "../components/icons";
 import { ClinicLogo } from "../branding/ClinicLogo";
 import { SyncBanner } from "../offline/SyncBanner";
@@ -15,16 +16,17 @@ type NavItem = {
 };
 
 const CARE: NavItem[] = [
-  { to: "/", label: "Dashboard", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION", "DOCTOR", "LAB", "PHARMACY", "CASHIER"], icon: "dashboard" },
+  { to: "/", label: "Dashboard", roles: ["SUPER_ADMIN", "ADMIN"], icon: "dashboard" },
+  { to: "/visits", label: "Queue", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION"], icon: "visits" },
   { to: "/patients", label: "Patients", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"], icon: "patients" },
-  { to: "/visits", label: "Visits", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION", "DOCTOR"], icon: "visits" },
-  { to: "/consultation", label: "Consultation", roles: ["SUPER_ADMIN", "ADMIN", "DOCTOR"], icon: "consultation" },
+  { to: "/patients/new", label: "New patient", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION"], icon: "patients" },
+  { to: "/consultation", label: "Queue", roles: ["SUPER_ADMIN", "ADMIN", "DOCTOR"], icon: "consultation" },
 ];
 
 const OPERATIONS: NavItem[] = [
-  { to: "/laboratory", label: "Laboratory", roles: ["SUPER_ADMIN", "ADMIN", "LAB", "DOCTOR", "RECEPTION"], icon: "lab" },
-  { to: "/pharmacy", label: "Pharmacy", roles: ["SUPER_ADMIN", "ADMIN", "PHARMACY"], icon: "pharmacy" },
-  { to: "/cashier", label: "Cashier", roles: ["SUPER_ADMIN", "ADMIN", "CASHIER", "RECEPTION"], icon: "cashier" },
+  { to: "/laboratory", label: "Lab queue", roles: ["SUPER_ADMIN", "ADMIN", "LAB", "DOCTOR", "RECEPTION"], icon: "lab" },
+  { to: "/pharmacy", label: "Dispensing", roles: ["SUPER_ADMIN", "ADMIN", "PHARMACY"], icon: "pharmacy" },
+  { to: "/cashier", label: "Payments", roles: ["SUPER_ADMIN", "ADMIN", "CASHIER", "RECEPTION"], icon: "cashier" },
 ];
 
 const ADMIN: NavItem[] = [
@@ -61,6 +63,57 @@ function pageTitle(pathname: string) {
     "/admin/prices": "Price list",
   };
   return map[pathname] || "ClinicFlow";
+}
+
+function InboxBell() {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<Array<{ id: string; title: string; body: string; href: string | null; readAt: string | null }>>([]);
+
+  async function load() {
+    try {
+      setItems(await get("/notifications"));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    const id = window.setInterval(() => void load(), 30000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const unread = items.filter((i) => !i.readAt).length;
+
+  return (
+    <div className="relative mb-3 flex justify-end">
+      <button type="button" className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm" onClick={() => setOpen((v) => !v)}>
+        Inbox{unread ? ` (${unread})` : ""}
+      </button>
+      {open ? (
+        <div className="absolute right-0 top-10 z-30 w-80 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+          {items.length === 0 ? <p className="p-2 text-sm text-slate-500">No notifications.</p> : null}
+          {items.slice(0, 12).map((n) => (
+            <button
+              key={n.id}
+              type="button"
+              className={`block w-full rounded px-2 py-2 text-left text-sm ${n.readAt ? "text-slate-500" : "bg-sky-50 text-slate-900"}`}
+              onClick={async () => {
+                await post(`/notifications/${n.id}/read`, {});
+                setOpen(false);
+                if (n.href) navigate(n.href);
+                await load();
+              }}
+            >
+              <div className="font-medium">{n.title}</div>
+              <div className="text-xs">{n.body}</div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function SidebarNav({
@@ -182,6 +235,7 @@ export function AppLayout() {
           </div>
         </div>
         <main className="mx-auto max-w-6xl p-4 md:p-8">
+          <InboxBell />
           <SyncBanner />
           <Outlet />
         </main>

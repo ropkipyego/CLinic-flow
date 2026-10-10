@@ -14,6 +14,7 @@ describe("ClinicFlow critical workflow", () => {
   let receptionB: string;
   let malariaId: string;
   let paraId: string;
+  let amoxId: string;
 
   beforeAll(async () => {
     await prisma.$connect();
@@ -32,6 +33,7 @@ describe("ClinicFlow critical workflow", () => {
     const catalog = await seedCatalog(a.id);
     malariaId = catalog.malaria.id;
     paraId = catalog.para.id;
+    amoxId = catalog.amox.id;
     adminA = await login("admin.a@test.clinic");
     reception = await login("reception.a@test.clinic");
     doctor = await login("doctor.a@test.clinic");
@@ -126,6 +128,18 @@ describe("ClinicFlow critical workflow", () => {
       .set(auth(lab))
       .send({ valueText: "Positive" });
     expect(result.status).toBe(201);
+    expect(result.body.data.verifiedAt).toBeNull();
+    const resultId = result.body.data.id as string;
+
+    const draftDoc = await request(app).get(`/api/v1/lab/results/${resultId}/document`).set(auth(doctor));
+    expect(draftDoc.body.data.final).toBe(false);
+
+    const verified = await request(app).post(`/api/v1/lab/results/${resultId}/verify`).set(auth(lab));
+    expect(verified.status).toBe(200);
+    expect(verified.body.data.verifiedAt).toBeTruthy();
+
+    const inbox = await request(app).get("/api/v1/notifications").set(auth(doctor));
+    expect(inbox.body.data.some((n: { entityId: string }) => n.entityId === resultId)).toBe(true);
 
     const clinical = await request(app).get(`/api/v1/encounters/${encounterId}/clinical`).set(auth(doctor));
     expect(clinical.body.data.encounter.labOrders[0].items[0].result.valueText).toBe("Positive");
@@ -143,11 +157,22 @@ describe("ClinicFlow critical workflow", () => {
             quantity: 10,
             instructions: "After food",
           },
+          {
+            medicineId: amoxId,
+            dose: "1 cap",
+            frequency: "TDS",
+            duration: "5 days",
+            quantity: 15,
+            instructions: "After food",
+          },
         ],
       });
     expect(rx.status).toBe(201);
+    expect(rx.body.data.items.length).toBe(2);
+    expect(rx.body.data.treatmentNumber).toMatch(/^TR-\d{4}$/);
     const prescriptionId = rx.body.data.id as string;
-    const rxItemId = rx.body.data.items[0].id as string;
+    const rxItemId = rx.body.data.items.find((i: { medicineId: string }) => i.medicineId === paraId).id as string;
+    const amoxItemId = rx.body.data.items.find((i: { medicineId: string }) => i.medicineId === amoxId).id as string;
 
     const pendingRx = await request(app).get("/api/v1/pharmacy/queue").set(auth(pharmacy));
     expect(pendingRx.body.data.some((p: { id: string }) => p.id === prescriptionId)).toBe(true);
@@ -171,6 +196,12 @@ describe("ClinicFlow critical workflow", () => {
       .send({ items: [{ prescriptionItemId: rxItemId, quantity: 1 }] });
     expect(overDispense.status).toBe(400);
 
+    const rest = await request(app)
+      .post(`/api/v1/pharmacy/prescriptions/${prescriptionId}/dispense`)
+      .set(auth(pharmacy))
+      .send({ items: [{ prescriptionItemId: amoxItemId, quantity: 15 }] });
+    expect(rest.status).toBe(201);
+
     const extra = await request(app)
       .post(`/api/v1/charges/encounters/${encounterId}`)
       .set(auth(cashier))
@@ -181,10 +212,16 @@ describe("ClinicFlow critical workflow", () => {
     expect(billing.body.data.balance).toBeGreaterThan(0);
     expect(billing.body.data.charges.some((c: { description: string }) => c.description === "Dressing")).toBe(true);
 
+    const receptionPay = await request(app)
+      .post(`/api/v1/payments/encounters/${encounterId}`)
+      .set(auth(reception))
+      .send({ amount: billing.body.data.balance, method: "CASH", clientRequestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
+    expect(receptionPay.status).toBe(403);
+
     const pay = await request(app)
       .post(`/api/v1/payments/encounters/${encounterId}`)
       .set(auth(cashier))
-      .send({ amount: billing.body.data.balance, method: "CASH" });
+      .send({ amount: billing.body.data.balance, method: "CASH", clientRequestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
     expect(pay.status).toBe(201);
     expect(pay.body.data.receipt.receiptNumber).toMatch(/^RCP-\d{6}$/);
 
@@ -240,7 +277,8 @@ describe("ClinicFlow critical workflow", () => {
     const cashierDash = await request(app).get("/api/v1/payments/today").set(auth(cashier));
     expect(cashierDash.body.data.pending.some((p: { encounterId: string }) => p.encounterId === encounterId)).toBe(true);
 
-    await request(app).post(`/api/v1/lab/results/items/${itemId}`).set(auth(lab)).send({ valueText: "Negative" });
+    const entered = await request(app).post(`/api/v1/lab/results/items/${itemId}`).set(auth(lab)).send({ valueText: "Negative" });
+    await request(app).post(`/api/v1/lab/results/${entered.body.data.id}/verify`).set(auth(lab));
 
     const afterLab = await request(app).get(`/api/v1/payments/encounters/${encounterId}`).set(auth(cashier));
     const pay = await request(app)
@@ -297,7 +335,7 @@ describe("ClinicFlow critical workflow", () => {
     const pay = await request(app)
       .post(`/api/v1/payments/encounters/${encounterId}`)
       .set(auth(cashier))
-      .send({ amount: billing.body.data.balance, method: "CASH" });
+      .send({ amount: billing.body.data.balance, method: "CASH", clientRequestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
     expect(pay.status).toBe(201);
     const done = await request(app).get(`/api/v1/encounters/${encounterId}`).set(auth(reception));
     expect(done.body.data.status).toBe("COMPLETED");

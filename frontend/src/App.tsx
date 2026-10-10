@@ -18,7 +18,8 @@ import { SmsPage } from "./pages/sms/SmsPage";
 import { AdminPage } from "./pages/admin/AdminPage";
 import { RolesPage } from "./pages/admin/RolesPage";
 import { PriceListPage } from "./pages/admin/PriceListPage";
-import { isClinicAdmin } from "./lib/roles";
+import { isClinicAdmin, homePath } from "./lib/roles";
+import { LabResultDocumentPage } from "./pages/lab/LabResultDocumentPage";
 
 function Guard({ roles, children }: { roles?: Role[]; children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -34,7 +35,7 @@ export function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/login" element={user ? <Navigate to={homePath(user.role)} replace /> : <LoginPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route
         element={
@@ -52,6 +53,7 @@ export function App() {
         <Route path="/consultation" element={<Guard roles={["DOCTOR"]}><ConsultationPage /></Guard>} />
         <Route path="/consultation/:encounterId" element={<Guard roles={["DOCTOR"]}><ConsultationPage /></Guard>} />
         <Route path="/laboratory" element={<Guard roles={["LAB", "DOCTOR", "RECEPTION"]}><LabPage /></Guard>} />
+        <Route path="/laboratory/results/:id" element={<Guard roles={["LAB", "DOCTOR"]}><LabResultDocumentPage /></Guard>} />
         <Route path="/pharmacy" element={<Guard roles={["PHARMACY"]}><PharmacyPage /></Guard>} />
         <Route path="/cashier" element={<Guard roles={["CASHIER", "RECEPTION"]}><CashierPage /></Guard>} />
         <Route path="/cashier/receipts/:id" element={<Guard roles={["CASHIER", "RECEPTION"]}><ReceiptPage /></Guard>} />

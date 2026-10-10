@@ -18,7 +18,6 @@ import {
   listStockMovements,
   otcSaleSchema,
   sellOtc,
-  applyPharmacyCatalog,
   importMedicines,
   importMedicinesSchema,
   sellingPricePatchSchema,
@@ -119,11 +118,6 @@ pharmacyRouter.post(
   }),
 );
 
-pharmacyRouter.post(
-  "/catalog/apply",
-  authorize("ADMIN", "PHARMACY"),
-  asyncHandler(async (req, res) => ok(res, await applyPharmacyCatalog(req.user!.tenantId, req.user!.id))),
-);
 
 pharmacyRouter.post(
   "/medicines/import",

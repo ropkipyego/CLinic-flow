@@ -17,3 +17,4 @@ frontend/dist
 *.tsbuildinfo
 .idea
 .vscode
+.backups

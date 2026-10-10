@@ -37,7 +37,7 @@ export function StockImportPanel({
   onOk: (m: string) => void;
 }) {
   const [text, setText] = useState(TEMPLATE);
-  const [receiveOpening, setReceiveOpening] = useState(true);
+  const [receiveOpening, setReceiveOpening] = useState(false);
 
   function downloadTemplate() {
     const blob = new Blob([TEMPLATE], { type: "text/csv" });

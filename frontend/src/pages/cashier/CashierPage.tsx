@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { getOrCreatePaymentKey, clearPaymentKey } from "../../lib/paymentKey";
+import { useToast } from "../../components/ToastProvider";
 import { get, post } from "../../api/client";
 import { Alert, Button, Empty, Field, PageHeader, Stat, StatusBadge, Table, inputClass } from "../../components/ui";
 import { Icons } from "../../components/icons";
@@ -21,6 +23,8 @@ type BillRow = {
 
 export function CashierPage() {
   const { tenant } = useAuth();
+  const navigate = useNavigate();
+  const toast = useToast();
   const currency = tenant?.currency || "KES";
   const [dash, setDash] = useState<any>(null);
   const [visits, setVisits] = useState<any[]>([]);
@@ -92,16 +96,21 @@ export function CashierPage() {
     e.preventDefault();
     if (!bill) return;
     try {
+      const clientRequestId = getOrCreatePaymentKey(bill.encounterId);
       const result = await post<any>(`/payments/encounters/${bill.encounterId}`, {
         amount: Number(amount),
         method,
         reference: reference || null,
+        clientRequestId,
       });
+      clearPaymentKey(bill.encounterId);
       setReceiptId(result.receipt.id);
       setOk(result.replayed ? "This payment was already recorded." : "Payment saved. Receipt is ready.");
+      toast.push(result.replayed ? "Existing receipt reused." : "Payment recorded.", "success");
       setReference("");
       await openBill(bill.encounterId);
       await load();
+      navigate(`/cashier/receipts/${result.receipt.id}?print=1`);
     } catch (err) {
       const queued = err instanceof ApiRequestError && err.queued;
       setError(queued ? err.message : err instanceof Error ? err.message : "Unable to record payment. The previous payment was not overwritten.");

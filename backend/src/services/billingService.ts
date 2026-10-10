@@ -195,7 +195,7 @@ export const receivePaymentSchema = z.object({
   amount: z.number().positive(),
   method: z.nativeEnum(PaymentMethod),
   reference: z.string().optional().nullable(),
-  clientRequestId: z.string().uuid().optional().nullable(),
+  clientRequestId: z.string().uuid(),
 });
 
 export async function receivePayment(
@@ -205,17 +205,16 @@ export async function receivePayment(
   input: z.infer<typeof receivePaymentSchema>,
   ip?: string,
 ) {
-  if (input.clientRequestId) {
-    const existing = await prisma.payment.findFirst({
-      where: { tenantId, clientRequestId: input.clientRequestId },
-      include: { receipt: true },
-    });
-    if (existing) {
-      return { payment: existing, receipt: existing.receipt, replayed: true as const };
-    }
+  const existing = await prisma.payment.findFirst({
+    where: { tenantId, clientRequestId: input.clientRequestId },
+    include: { receipt: true },
+  });
+  if (existing) {
+    return { payment: existing, receipt: existing.receipt, replayed: true as const };
   }
 
-  return prisma.$transaction(async (tx) => {
+  try {
+  return await prisma.$transaction(async (tx) => {
     if (input.clientRequestId) {
       const raced = await tx.payment.findFirst({
         where: { tenantId, clientRequestId: input.clientRequestId },
@@ -318,6 +317,16 @@ export async function receivePayment(
     await refreshEncounterStatus(tx, tenantId, encounterId);
     return { payment, receipt, replayed: false as const };
   });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      const raced = await prisma.payment.findFirst({
+        where: { tenantId, clientRequestId: input.clientRequestId },
+        include: { receipt: true },
+      });
+      if (raced) return { payment: raced, receipt: raced.receipt, replayed: true as const };
+    }
+    throw err;
+  }
 }
 
 export async function getReceipt(tenantId: string, receiptId: string) {

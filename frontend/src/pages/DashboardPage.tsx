@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { get } from "../api/client";
 import { Alert, Button, Empty, PageHeader, Stat, StatusBadge, Table, cellClass, inputClass } from "../components/ui";
 import { Icons } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
 import { formatMoney, VISIT_TYPE_LABEL } from "../lib/labels";
 import { useUiState } from "../lib/uiState";
-import { isClinicAdmin } from "../lib/roles";
+import { isClinicAdmin, homePath } from "../lib/roles";
 
 type Dash = {
   generatedAt: string;
@@ -67,6 +67,9 @@ const shortcuts: Record<string, { to: string; label: string }[]> = {
 
 export function DashboardPage() {
   const { tenant, user } = useAuth();
+  if (user && !isClinicAdmin(user.role)) {
+    return <Navigate to={homePath(user.role)} replace />;
+  }
   const [dash, setDash] = useState<Dash | null>(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useUiState("dashboard.filter", "ALL");

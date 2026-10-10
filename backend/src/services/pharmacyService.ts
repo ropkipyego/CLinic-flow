@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma, type TxClient } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
 import { badRequest, forbidden, notFound } from "../lib/errors.js";
+import { nextTreatmentNumber } from "../lib/sequences.js";
 import { money } from "../lib/serialize.js";
 import { CLINIC_MEDICINES } from "../data/pharmacyCatalog.js";
 import { createChargeInTx } from "./billingService.js";
@@ -276,25 +277,59 @@ export async function createPrescription(
     throw badRequest("One or more medicines are invalid or inactive.");
   }
 
+  const itemData = input.items.map((item) => ({
+    tenantId,
+    medicineId: item.medicineId,
+    dose: item.dose,
+    frequency: item.frequency,
+    duration: item.duration,
+    quantity: item.quantity,
+    instructions: item.instructions ?? null,
+  }));
+
   const prescription = await prisma.$transaction(async (tx) => {
+    const pending = await tx.prescription.findFirst({
+      where: { tenantId, encounterId, doctorId: actorId, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (pending) {
+      await tx.prescriptionItem.createMany({ data: itemData.map((row) => ({ ...row, prescriptionId: pending.id })) });
+      if (input.notes) {
+        await tx.prescription.update({
+          where: { id: pending.id },
+          data: { notes: [pending.notes, input.notes].filter(Boolean).join("\n") },
+        });
+      }
+      const updated = await tx.prescription.findFirstOrThrow({
+        where: { id: pending.id },
+        include: { items: { include: { medicine: true } }, patient: true, encounter: true },
+      });
+      await writeAudit(
+        {
+          tenantId,
+          userId: actorId,
+          action: "prescription.items_added",
+          entity: "prescription",
+          entityId: updated.id,
+          ipAddress: ip,
+        },
+        tx,
+      );
+      await tx.encounter.update({ where: { id: encounterId }, data: { status: "WAITING_PHARMACY" } });
+      await refreshEncounterStatus(tx, tenantId, encounterId);
+      return updated;
+    }
+
+    const treatmentNumber = await nextTreatmentNumber(tx, tenantId);
     const created = await tx.prescription.create({
       data: {
         tenantId,
         encounterId,
         patientId: encounter.patientId,
         doctorId: actorId,
+        treatmentNumber,
         notes: input.notes ?? null,
-        items: {
-          create: input.items.map((item) => ({
-            tenantId,
-            medicineId: item.medicineId,
-            dose: item.dose,
-            frequency: item.frequency,
-            duration: item.duration,
-            quantity: item.quantity,
-            instructions: item.instructions ?? null,
-          })),
-        },
+        items: { create: itemData },
       },
       include: { items: { include: { medicine: true } }, patient: true, encounter: true },
     });

@@ -61,7 +61,19 @@ export async function api<T>(path: string, init: RequestInit & { skipQueue?: boo
   }
 
   const text = await res.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload: any = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new ApiRequestError(
+        res.status === 502
+          ? "The ClinicFlow API is not responding. Check that the API service is running."
+          : `Request failed (${res.status}).`,
+        res.status,
+      );
+    }
+  }
   if (!res.ok || payload?.success === false) {
     const message = payload?.error?.message || `Request failed (${res.status}).`;
     if (res.status === 401) {
