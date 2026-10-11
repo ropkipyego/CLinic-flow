@@ -87,6 +87,7 @@ export const env = {
   smsWorkerPollMs: num("SMS_WORKER_POLL_MS", 3000),
   smsMaxAttempts: num("SMS_MAX_ATTEMPTS", 3),
   seedOnStart: bool("SEED_ON_START", false),
+  catalogueImportWrite: bool("CATALOGUE_IMPORT_WRITE", false),
 };
 
 if (env.isDevelopment && (env.email.enabled || env.sms.enabled)) {

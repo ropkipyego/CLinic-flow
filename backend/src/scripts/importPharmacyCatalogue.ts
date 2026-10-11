@@ -68,8 +68,8 @@ async function main() {
     console.error("Usage: tsx src/scripts/importPharmacyCatalogue.ts --file <xlsx> --tenant-slug <slug> [--write]");
     process.exit(1);
   }
-  if (env.nodeEnv === "production" && hasFlag("--write")) {
-    console.error("Refusing to write catalogue import in production from this script.");
+  if (hasFlag("--write") && (env.isProduction || !env.catalogueImportWrite)) {
+    console.error("Refusing to write catalogue import. Production is blocked; non-production writes require CATALOGUE_IMPORT_WRITE=true.");
     process.exit(1);
   }
   const tenant = await prisma.tenant.findUnique({ where: { slug } });

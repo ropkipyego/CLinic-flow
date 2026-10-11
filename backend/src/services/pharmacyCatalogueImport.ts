@@ -15,15 +15,20 @@ export type CatalogueSourceRow = {
 
 export type CatalogueImportReport = {
   sourceRows: number;
+  validCatalogueItems: number;
   created: number;
   matched: number;
   skipped: number;
   unresolved: number;
   zeroPrice: number;
+  missingSellingPrice: number;
   missingDescription: number;
   missingUnit: number;
   quantityMissingOrNegative: number;
+  negativeQuantity: number;
   priceGrossMismatch: number;
+  costExceedsSellingPrice: number;
+  stockChangesProposed: 0;
   issues: Array<{ row: number; item: string; code: string; detail: string }>;
   dryRun: boolean;
 };
@@ -53,10 +58,10 @@ export function parseCatalogueRows(rows: Record<string, unknown>[]): CatalogueSo
     item: String(raw.Item ?? raw.item ?? "").trim(),
     description: String(raw.Description ?? raw.description ?? "").trim(),
     quantityOnHand: num(raw["Quantity On Hand"] ?? raw.quantityOnHand),
-    unit: String(raw["U/M"] ?? raw.unit ?? "").trim(),
+    unit: String(raw["U/M"] ?? raw.UM ?? raw.unit ?? "").trim(),
     cost: num(raw.Cost ?? raw.cost),
-    price: num(raw.Price ?? raw.price),
-    grossPrice: num(raw["Gross Price"] ?? raw.grossPrice),
+    price: num(raw.PRICE ?? raw.Price ?? raw.price),
+    grossPrice: num(raw["Gross Price"] ?? raw.grossPrice ?? raw.PRICE ?? raw.Price),
     rowNumber: i + 2,
   }));
 }
@@ -69,15 +74,20 @@ export async function importPharmacyCatalogue(opts: {
 }): Promise<CatalogueImportReport> {
   const report: CatalogueImportReport = {
     sourceRows: opts.rows.length,
+    validCatalogueItems: 0,
     created: 0,
     matched: 0,
     skipped: 0,
     unresolved: 0,
     zeroPrice: 0,
+    missingSellingPrice: 0,
     missingDescription: 0,
     missingUnit: 0,
     quantityMissingOrNegative: 0,
+    negativeQuantity: 0,
     priceGrossMismatch: 0,
+    costExceedsSellingPrice: 0,
+    stockChangesProposed: 0,
     issues: [],
     dryRun: opts.dryRun,
   };
@@ -105,19 +115,34 @@ export async function importPharmacyCatalogue(opts: {
     if (row.quantityOnHand === null || row.quantityOnHand < 0) {
       report.quantityMissingOrNegative += 1;
     }
+    if (row.quantityOnHand !== null && row.quantityOnHand < 0) {
+      report.negativeQuantity += 1;
+      note(row.rowNumber, row.item, "NEGATIVE_QTY", `Workbook quantity ${row.quantityOnHand} is not imported. Stock is unchanged.`);
+    }
     if (row.price === 0) {
       report.zeroPrice += 1;
-      note(row.rowNumber, row.item, "ZERO_PRICE", "Selling price is 0 and will be kept as 0.");
+      note(row.rowNumber, row.item, "ZERO_PRICE", "Selling price is 0 and will be kept as 0. Cost is not used as a substitute.");
     }
     if (row.price !== null && row.grossPrice !== null && row.price !== row.grossPrice) {
       report.priceGrossMismatch += 1;
       note(row.rowNumber, row.item, "PRICE_GROSS_MISMATCH", `Price ${row.price} vs Gross Price ${row.grossPrice}. Price is used.`);
     }
+    if (row.price !== null && row.cost !== null && row.cost > row.price) {
+      report.costExceedsSellingPrice += 1;
+      note(row.rowNumber, row.item, "COST_GT_PRICE", `Cost ${row.cost} is above selling price ${row.price}. Both stored; not swapped.`);
+    }
     if (row.price === null) {
       report.skipped += 1;
-      note(row.rowNumber, row.item, "INVALID_PRICE", "Price is missing or not a number.");
+      report.missingSellingPrice += 1;
+      note(
+        row.rowNumber,
+        row.item,
+        "MISSING_SELLING_PRICE",
+        "Selling price is blank. Cost is not used as the selling price. Row skipped. Workbook quantity is ignored.",
+      );
       continue;
     }
+    report.validCatalogueItems += 1;
 
     const key = sourceKey(row.item);
     if (createdKeys.has(key)) {

@@ -3,6 +3,9 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import { param } from "../lib/params.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 import { created, ok } from "../lib/response.js";
+import { z } from "zod";
+import { env } from "../config/env.js";
+import { badRequest } from "../lib/errors.js";
 import {
   createPrescription,
   dispensePrescription,
@@ -23,6 +26,7 @@ import {
   sellingPricePatchSchema,
   updateMedicineSellingPrice,
 } from "../services/pharmacyService.js";
+import { importPharmacyCatalogue, parseCatalogueRows } from "../services/pharmacyCatalogueImport.js";
 
 export const pharmacyRouter = Router();
 pharmacyRouter.use(authenticate);
@@ -125,6 +129,33 @@ pharmacyRouter.post(
   asyncHandler(async (req, res) =>
     created(res, await importMedicines(req.user!.tenantId, req.user!.id, importMedicinesSchema.parse(req.body))),
   ),
+);
+
+const catalogueImportBody = z.object({
+  rows: z.array(z.record(z.string(), z.any())),
+  dryRun: z.boolean().optional(),
+});
+
+pharmacyRouter.post(
+  "/catalogue/import",
+  authorize("ADMIN"),
+  asyncHandler(async (req, res) => {
+    const body = catalogueImportBody.parse(req.body);
+    const dryRun = body.dryRun !== false;
+    if (!dryRun && (env.isProduction || !env.catalogueImportWrite)) {
+      throw badRequest(
+        "Catalogue write is blocked. Run a dry-run, review the report, then set CATALOGUE_IMPORT_WRITE=true in a non-production approval window. Workbook quantities are never imported.",
+      );
+    }
+    const rows = parseCatalogueRows(body.rows);
+    const report = await importPharmacyCatalogue({
+      tenantId: req.user!.tenantId,
+      actorId: req.user!.id,
+      rows,
+      dryRun,
+    });
+    return ok(res, report);
+  }),
 );
 
 export const inventoryRouter = Router();

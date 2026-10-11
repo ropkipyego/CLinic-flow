@@ -7,6 +7,13 @@ export const prisma = new PrismaClient();
 export const app = createApp();
 
 export async function resetDb() {
+  const url = process.env.DATABASE_URL || "";
+  const isolated = /clinicflow_test|_test\b|\/test\b/i.test(url);
+  if (!isolated) {
+    throw new Error(
+      "Refusing to truncate. Point DATABASE_URL at an isolated clinicflow_test database before running tests.",
+    );
+  }
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "InboxNotification",

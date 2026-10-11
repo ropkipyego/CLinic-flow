@@ -45,4 +45,27 @@ describe("pharmacy catalogue import", () => {
     expect(await prisma.medicine.count({ where: { tenantId } })).toBe(2);
     expect(await prisma.stockMovement.count({ where: { tenantId } })).toBe(0);
   });
+
+  it("reads PRICE header, skips blank selling prices, and never proposes stock from the workbook", () => {
+    const rows = parseCatalogueRows([
+      { Item: "ZYRTEC 1MG/ML 75ML", Description: "ANTI-ALLERGIC", "Quantity On Hand": "5", Cost: "26", PRICE: "" },
+      { Item: "ACINET 625MG", Description: "ANTIBIOTICS", "Quantity On Hand": "-17", Cost: "80", PRICE: "" },
+      { Item: "NAMED WITH PRICE", Description: "ANALGESIC", "Quantity On Hand": "40", Cost: "4", PRICE: "10" },
+    ]);
+    expect(rows[0]!.price).toBeNull();
+    expect(rows[2]!.price).toBe(10);
+  });
+
+  it("does not create products when the workbook has no selling price", async () => {
+    const rows = parseCatalogueRows([
+      { Item: "NO PRICE SYRUP", Description: "ANTIBIOTICS", "Quantity On Hand": "12", Cost: "50", PRICE: "" },
+    ]);
+    const dry = await importPharmacyCatalogue({ tenantId, actorId, rows, dryRun: true });
+    expect(dry.skipped).toBe(1);
+    expect(dry.missingSellingPrice).toBe(1);
+    expect(dry.created).toBe(0);
+    expect(dry.stockChangesProposed).toBe(0);
+    expect(dry.validCatalogueItems).toBe(0);
+    expect(await prisma.medicine.count({ where: { tenantId, name: "NO PRICE SYRUP" } })).toBe(0);
+  });
 });
