@@ -147,6 +147,10 @@ export function AdminPage() {
             ["smsSenderId", "SMS sender ID"],
             ["timezone", "Timezone"],
             ["currency", "Currency"],
+            ["taxPin", "Clinic tax PIN"],
+            ["lpoDeliveryLocation", "Default LPO delivery location"],
+            ["lpoPaymentTerms", "Default LPO payment terms"],
+            ["lpoStandardTerms", "Standard LPO terms"],
             ["primaryColor", "Primary color"],
             ["secondaryColor", "Secondary color"],
           ] as const).map(([k, label]) => (

@@ -5,13 +5,14 @@ import { Icons } from "../../components/icons";
 import { useUiState } from "../../lib/uiState";
 import { MedicineSelect } from "../../components/MedicinePicker";
 import { StockItemsPanel } from "../pharmacy/StockItemsPanel";
-import { StockImportPanel } from "../pharmacy/StockImportPanel";
 import { PurchaseOrderPanel } from "../pharmacy/PurchaseOrderPanel";
 import { StockTakePanel } from "../pharmacy/StockTakePanel";
 import { CatalogueImportPanel } from "./CatalogueImportPanel";
+import { useToast } from "../../components/ToastProvider";
 
 export function InventoryPage() {
-  const [tab, setTab] = useUiState<"levels" | "items" | "take" | "lpo" | "csv" | "catalogue">("inventory.tab", "levels");
+  const toast = useToast();
+  const [tab, setTab] = useUiState<"levels" | "items" | "take" | "lpo" | "csv" | "receive">("inventory.tab", "levels");
   const [meds, setMeds] = useState<any[]>([]);
   const [movements, setMovements] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -31,7 +32,9 @@ export function InventoryPage() {
       setMeds(await get("/pharmacy/medicines"));
       setMovements(await get("/inventory/movements"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to load inventory.");
+      const msg = e instanceof Error ? e.message : "Unable to load inventory.";
+      setError(msg);
+      toast.push(msg, "error");
     }
   }
 
@@ -45,15 +48,15 @@ export function InventoryPage() {
     e.preventDefault();
     const qty = Number(move.quantity);
     if (!move.medicineId) {
-      setError("Choose a medicine from the item master.");
+      toast.push("Choose a medicine from the item master.", "warning");
       return;
     }
     if (!Number.isInteger(qty) || qty < 1) {
-      setError("Quantity must be a whole number of at least 1.");
+      toast.push("Quantity must be a whole number of at least 1.", "warning");
       return;
     }
     if (move.action === "OUT" && !move.notes.trim()) {
-      setError("A reason is required when reducing stock.");
+      toast.push("A reason is required when reducing stock.", "warning");
       return;
     }
     try {
@@ -67,11 +70,15 @@ export function InventoryPage() {
         notes: move.notes || (direction === "OUT" ? "Stock adjustment out" : "Stock received"),
       });
       const name = meds.find((m) => m.id === move.medicineId)?.name || "Item";
-      setOk(direction === "OUT" ? `${name}: stock reduced by ${qty}.` : `${name}: stock increased by ${qty}.`);
+      const msg = direction === "OUT" ? `${name}: stock reduced by ${qty}.` : `${name}: stock increased by ${qty}.`;
+      setOk(msg);
+      toast.push(msg, "success");
       setMove((s) => ({ ...s, quantity: "10", notes: "" }));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to record stock movement.");
+      const msg = err instanceof Error ? err.message : "Unable to record stock movement.";
+      setError(msg);
+      toast.push(msg, "error");
     }
   }
 
@@ -92,15 +99,15 @@ export function InventoryPage() {
     <div className="space-y-4">
       <PageHeader
         title="Stock & inventory"
-        subtitle="Item master, shelf quantities, movements, LPO/GRN and stock take. Zero on hand is a valid catalogue state."
+        subtitle="Pharmacy dispensing stays on Pharmacy. Here: stock, catalogue, LPOs, and receiving against orders."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button variant={tab === "levels" ? "primary" : "secondary"} onClick={() => setTab("levels")}>Stock levels</Button>
-            <Button variant={tab === "items" ? "primary" : "secondary"} onClick={() => setTab("items")}>Item master</Button>
-            <Button variant={tab === "take" ? "primary" : "secondary"} onClick={() => setTab("take")}>Stock take</Button>
-            <Button variant={tab === "lpo" ? "primary" : "secondary"} onClick={() => setTab("lpo")}>Procurement</Button>
-            <Button variant={tab === "catalogue" ? "primary" : "secondary"} onClick={() => setTab("catalogue")}>Excel dry-run</Button>
+            <Button variant={tab === "levels" ? "primary" : "secondary"} onClick={() => setTab("levels")}>Stock</Button>
+            <Button variant={tab === "items" ? "primary" : "secondary"} onClick={() => setTab("items")}>Catalogue</Button>
             <Button variant={tab === "csv" ? "primary" : "secondary"} onClick={() => setTab("csv")}>CSV import</Button>
+            <Button variant={tab === "take" ? "primary" : "secondary"} onClick={() => setTab("take")}>Stock take</Button>
+            <Button variant={tab === "lpo" ? "primary" : "secondary"} onClick={() => setTab("lpo")}>LPOs</Button>
+            <Button variant={tab === "receive" ? "primary" : "secondary"} onClick={() => setTab("receive")}>Goods receiving</Button>
           </div>
         }
       />
@@ -111,10 +118,9 @@ export function InventoryPage() {
       {ok ? <Alert kind="success">{ok}</Alert> : null}
 
       {tab === "items" ? <StockItemsPanel meds={meds} onSaved={load} onError={setError} onOk={setOk} /> : null}
-      {tab === "csv" ? <StockImportPanel onSaved={load} onError={setError} onOk={setOk} /> : null}
-      {tab === "catalogue" ? <CatalogueImportPanel /> : null}
-      {tab === "lpo" ? <PurchaseOrderPanel meds={meds} onError={setError} onOk={setOk} onStockChanged={load} /> : null}
-      {tab === "take" ? <StockTakePanel onError={setError} onOk={setOk} onStockChanged={load} /> : null}
+      {tab === "csv" ? <CatalogueImportPanel onSaved={load} /> : null}
+      {tab === "lpo" || tab === "receive" ? <PurchaseOrderPanel meds={meds} onStockChanged={load} /> : null}
+      {tab === "take" ? <StockTakePanel onStockChanged={load} /> : null}
 
       {tab === "levels" ? (
         <>
@@ -170,7 +176,7 @@ export function InventoryPage() {
           {visibleMeds.length === 0 ? (
             <Empty title="No medicines in the item master yet." body="Add items at zero stock, or run an approved catalogue import after dry-run review." />
           ) : (
-            <Table headers={["Medicine", "Form", "SKU", "On hand", "Status", "Price"]}>
+            <Table headers={["Medicine", "Form", "ATEN / SKU", "On hand", "Status", "Cost", "Selling"]}>
               {visibleMeds.map((m) => (
                 <tr
                   key={m.id}
@@ -187,7 +193,8 @@ export function InventoryPage() {
                   <td className="px-3 py-2 text-xs">
                     {m.quantityOnHand === 0 ? "Zero stock" : m.lowStock ? "Low" : "In stock"}
                   </td>
-                  <td className="px-3 py-2">{m.sellingPrice}</td>
+                  <td className="px-3 py-2">{m.costPrice}</td>
+                  <td className="px-3 py-2">{m.needsSellingPrice ? "Needs price" : m.sellingPrice}</td>
                 </tr>
               ))}
             </Table>

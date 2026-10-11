@@ -1,16 +1,16 @@
 import { FormEvent, useEffect, useState } from "react";
 import { get, patch, post } from "../../api/client";
 import { Button, Empty, Field, StatusBadge, Table, inputClass } from "../../components/ui";
+import { useToast } from "../../components/ToastProvider";
 
 export function StockTakePanel({
-  onError,
-  onOk,
   onStockChanged,
 }: {
-  onError: (m: string) => void;
-  onOk: (m: string) => void;
+  onError?: (m: string) => void;
+  onOk?: (m: string) => void;
   onStockChanged: () => Promise<void>;
 }) {
+  const toast = useToast();
   const [takes, setTakes] = useState<any[]>([]);
   const [current, setCurrent] = useState<any>(null);
   const [counts, setCounts] = useState<Record<string, string>>({});
@@ -19,7 +19,7 @@ export function StockTakePanel({
     try {
       setTakes(await get("/procurement/stock-takes"));
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Unable to load stock takes.");
+      toast.push(e instanceof Error ? e.message : "Unable to load stock takes.", "error");
     }
   }
 
@@ -40,10 +40,10 @@ export function StockTakePanel({
     try {
       const take = await post<any>("/procurement/stock-takes", {});
       applyTake(take);
-      onOk(`Stock take ${take.takeNumber} opened. Enter physical counts, then post.`);
+      toast.push(`Stock take ${take.takeNumber} opened. Enter physical counts, then post.`, "success");
       await load();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Unable to start a stock take.");
+      toast.push(err instanceof Error ? err.message : "Unable to start a stock take.", "error");
     }
   }
 
@@ -51,7 +51,7 @@ export function StockTakePanel({
     try {
       applyTake(await get(`/procurement/stock-takes/${id}`));
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Unable to open that stock take.");
+      toast.push(err instanceof Error ? err.message : "Unable to open that stock take.", "error");
     }
   }
 
@@ -65,9 +65,9 @@ export function StockTakePanel({
           .map(([medicineId, countedQty]) => ({ medicineId, countedQty: Number(countedQty) })),
       });
       applyTake(take);
-      onOk("Counts saved. Post when the physical count is finished.");
+      toast.push("Counts saved. Post when the physical count is finished.", "success");
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Unable to save counts.");
+      toast.push(err instanceof Error ? err.message : "Unable to save counts.", "error");
     }
   }
 
@@ -77,11 +77,11 @@ export function StockTakePanel({
     try {
       const take = await post<any>(`/procurement/stock-takes/${current.id}/post`, {});
       applyTake(take);
-      onOk(`${take.takeNumber} posted. Variances are now on the shelf.`);
+      toast.push(`${take.takeNumber} posted. Variances are now on the shelf.`, "success");
       await load();
       await onStockChanged();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Unable to post the stock take.");
+      toast.push(err instanceof Error ? err.message : "Unable to post the stock take.", "error");
     }
   }
 

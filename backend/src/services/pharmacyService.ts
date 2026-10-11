@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma, type TxClient } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
 import { badRequest, forbidden, notFound } from "../lib/errors.js";
+import { assertCatalogueWritesAllowed } from "../lib/catalogueWriteGuard.js";
 import { nextTreatmentNumber } from "../lib/sequences.js";
 import { money } from "../lib/serialize.js";
 import { CLINIC_MEDICINES } from "../data/pharmacyCatalog.js";
@@ -17,7 +18,7 @@ export const medicineSchema = z.object({
   dosageForm: z.string().optional().nullable(),
   unit: z.string().optional(),
   sku: z.string().min(1),
-  sellingPrice: z.number().nonnegative(),
+  sellingPrice: z.number().nonnegative().nullable().optional(),
   costPrice: z.number().nonnegative(),
   reorderLevel: z.number().int().nonnegative().optional(),
   active: z.boolean().optional(),
@@ -96,7 +97,7 @@ export function serializeMedicine(m: {
   dosageForm: string | null;
   unit: string;
   sku: string;
-  sellingPrice: Prisma.Decimal;
+  sellingPrice: Prisma.Decimal | null;
   costPrice: Prisma.Decimal;
   reorderLevel: number;
   quantityOnHand: number;
@@ -104,10 +105,18 @@ export function serializeMedicine(m: {
 }) {
   return {
     ...m,
-    sellingPrice: money(m.sellingPrice),
+    sellingPrice: m.sellingPrice === null ? null : money(m.sellingPrice),
     costPrice: money(m.costPrice),
+    needsSellingPrice: m.sellingPrice === null,
     lowStock: m.quantityOnHand <= m.reorderLevel,
   };
+}
+
+export function requireSellingPrice(medicine: { name: string; sellingPrice: Prisma.Decimal | null }): number {
+  if (medicine.sellingPrice === null) {
+    throw badRequest(`${medicine.name} has no selling price. Set it on the price list before dispensing or billing.`);
+  }
+  return money(medicine.sellingPrice);
 }
 
 export async function upsertMedicine(
@@ -123,7 +132,7 @@ export async function upsertMedicine(
     dosageForm: input.dosageForm ?? null,
     unit: input.unit ?? "unit",
     sku: input.sku.toUpperCase(),
-    sellingPrice: input.sellingPrice,
+    sellingPrice: input.sellingPrice ?? null,
     costPrice: input.costPrice,
     reorderLevel: input.reorderLevel ?? 10,
     active: input.active ?? true,
@@ -435,7 +444,7 @@ export async function dispensePrescription(
         source: "PHARMACY",
         description: `${rxItem.medicine.name}${rxItem.medicine.strength ? ` ${rxItem.medicine.strength}` : ""}`,
         quantity: item.quantity,
-        unitPrice: money(rxItem.medicine.sellingPrice),
+        unitPrice: requireSellingPrice(rxItem.medicine),
       });
 
       await tx.dispenseItem.create({
@@ -544,7 +553,7 @@ export const importMedicinesSchema = z.object({
         strength: z.string().optional().nullable(),
         dosageForm: z.string().optional().nullable(),
         unit: z.string().optional(),
-        sellingPrice: z.number().nonnegative(),
+        sellingPrice: z.number().nonnegative().nullable().optional(),
         costPrice: z.number().nonnegative().optional(),
         reorderLevel: z.number().int().nonnegative().optional(),
         quantity: z.number().int().nonnegative().optional(),
@@ -560,52 +569,49 @@ export async function importMedicines(
   actorId: string,
   input: z.infer<typeof importMedicinesSchema>,
 ) {
-  let created = 0;
-  let updated = 0;
-  let received = 0;
-  for (const row of input.rows) {
-    const sku = row.sku.trim().toUpperCase();
-    const existing = await prisma.medicine.findFirst({ where: { tenantId, sku } });
-    const data = {
-      name: row.name.trim(),
-      genericName: row.genericName?.trim() || null,
-      strength: row.strength?.trim() || null,
-      dosageForm: row.dosageForm?.trim() || null,
-      unit: row.unit?.trim() || "unit",
-      sellingPrice: row.sellingPrice,
-      costPrice: row.costPrice ?? 0,
-      reorderLevel: row.reorderLevel ?? 10,
-      active: true,
-    };
-    const medicine = existing
-      ? await prisma.medicine.update({ where: { id: existing.id }, data })
-      : await prisma.medicine.create({ data: { tenantId, sku, ...data, quantityOnHand: 0 } });
-    if (existing) updated += 1;
-    else created += 1;
-    if (input.receiveOpening && row.quantity && row.quantity > 0) {
-      await recordStockMovement(
-        tenantId,
-        actorId,
-        "ADMIN",
-        {
-          medicineId: medicine.id,
-          type: "OPENING_BALANCE",
-          quantity: row.quantity,
-          direction: "IN",
-          notes: "CSV / stock import",
-        },
-      );
-      received += 1;
-    }
+  if (input.receiveOpening) {
+    throw badRequest("Catalogue import never posts stock. Use the opening-stock import after dry-run confirmation.");
   }
-  await writeAudit({
-    tenantId,
-    userId: actorId,
-    action: "pharmacy.stock_imported",
-    entity: "medicine",
-    metadata: { created, updated, received, total: input.rows.length },
+  assertCatalogueWritesAllowed();
+  return prisma.$transaction(async (tx) => {
+    let created = 0;
+    let updated = 0;
+    for (const row of input.rows) {
+      const sku = row.sku.trim();
+      const existing = await tx.medicine.findFirst({
+        where: { tenantId, sku: { equals: sku, mode: "insensitive" } },
+      });
+      const data = {
+        name: row.name.trim(),
+        genericName: row.genericName?.trim() || null,
+        strength: row.strength?.trim() || null,
+        dosageForm: row.dosageForm?.trim() || null,
+        unit: row.unit?.trim() || "unit",
+        sellingPrice: row.sellingPrice ?? null,
+        costPrice: row.costPrice ?? 0,
+        reorderLevel: row.reorderLevel ?? 10,
+        active: true,
+      };
+      if (existing) {
+        await tx.medicine.update({ where: { id: existing.id }, data });
+        updated += 1;
+      } else {
+        await tx.medicine.create({ data: { tenantId, sku, ...data, quantityOnHand: 0 } });
+        created += 1;
+      }
+    }
+    await writeAudit(
+      {
+        tenantId,
+        userId: actorId,
+        action: "pharmacy.stock_imported",
+        entity: "medicine",
+        metadata: { created, updated, received: 0, total: input.rows.length },
+      },
+      tx,
+    );
+    return { created, updated, received: 0, total: input.rows.length };
   });
-  return { created, updated, received, total: input.rows.length };
 }
 
 export const otcSaleSchema = z.object({
@@ -736,7 +742,7 @@ export async function sellOtc(
         source: "PHARMACY",
         description: `${medicine.name}${medicine.strength ? ` ${medicine.strength}` : ""}`,
         quantity: item.quantity,
-        unitPrice: money(medicine.sellingPrice),
+        unitPrice: requireSellingPrice(medicine),
       });
       charges.push(charge);
       await tx.dispenseItem.create({

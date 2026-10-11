@@ -80,6 +80,8 @@ enum StockMovementType {
 
 enum PurchaseOrderStatus {
   DRAFT
+  PENDING_APPROVAL
+  APPROVED
   ISSUED
   PARTIAL
   RECEIVED
@@ -151,6 +153,10 @@ model Tenant {
   smsSenderId    String?
   timezone       String   @default("Africa/Nairobi")
   currency       String   @default("KES")
+  taxPin              String?
+  lpoDeliveryLocation String?
+  lpoPaymentTerms     String?
+  lpoStandardTerms    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -188,6 +194,7 @@ model Tenant {
   stockTakeLines      StockTakeLine[]
   inboxNotifications  InboxNotification[]
   catalogueImportMaps CatalogueImportMap[]
+  importBatches       ImportBatch[]
 }
 
 model User {
@@ -220,6 +227,8 @@ model User {
   auditLogs           AuditLog[]
   passwordResets      PasswordResetToken[]
   purchaseOrders      PurchaseOrder[]      @relation("PurchaseOrderCreatedBy")
+  approvedPurchaseOrders PurchaseOrder[]   @relation("PurchaseOrderApprovedBy")
+  importBatches       ImportBatch[]        @relation("ImportBatchCreatedBy")
   goodsReceipts       GoodsReceipt[]       @relation("GoodsReceiptReceivedBy")
   stockTakes          StockTake[]          @relation("StockTakeCountedBy")
   verifiedLabResults  LabResult[]          @relation("LabResultVerifiedBy")
@@ -516,7 +525,7 @@ model Medicine {
   unit           String   @default("unit")
   sku            String
   category       String?
-  sellingPrice   Decimal  @db.Decimal(12, 2)
+  sellingPrice   Decimal? @db.Decimal(12, 2)
   costPrice      Decimal  @db.Decimal(12, 2)
   reorderLevel   Int      @default(10)
   quantityOnHand Int      @default(0)
@@ -812,16 +821,19 @@ model Sequence {
 }
 
 model Supplier {
-  id        String   @id @default(uuid())
-  tenantId  String
-  name      String
-  phone     String?
-  email     String?
-  location  String?
-  notes     String?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  phone       String?
+  email       String?
+  location    String?
+  contactName String?
+  address     String?
+  taxPin      String?
+  notes       String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   purchaseOrders PurchaseOrder[]
@@ -830,23 +842,38 @@ model Supplier {
 }
 
 model PurchaseOrder {
-  id           String              @id @default(uuid())
-  tenantId     String
-  lpoNumber    String
-  supplierId   String
-  status       PurchaseOrderStatus @default(DRAFT)
-  notes        String?
-  expectedDate DateTime?           @db.Date
-  issuedAt     DateTime?
-  createdById  String
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  id                   String              @id @default(uuid())
+  tenantId             String
+  lpoNumber            String
+  supplierId           String
+  status               PurchaseOrderStatus @default(DRAFT)
+  notes                String?
+  expectedDate         DateTime?           @db.Date
+  orderDate            DateTime            @default(now()) @db.Date
+  issuedAt             DateTime?
+  submittedAt          DateTime?
+  approvedAt           DateTime?
+  deliveryLocation     String?
+  paymentTerms         String?
+  deliveryInstructions String?
+  quotationNumber      String?
+  taxPercent           Decimal             @default(0) @db.Decimal(6, 2)
+  deliveryCharge       Decimal             @default(0) @db.Decimal(12, 2)
+  reprintCount         Int                 @default(0)
+  duplicatedFromId     String?
+  createdById          String
+  approvedById         String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
 
-  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supplier  Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  createdBy User                @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
-  lines     PurchaseOrderLine[]
-  receipts  GoodsReceipt[]
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier       Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy      User                @relation("PurchaseOrderCreatedBy", fields: [createdById], references: [id])
+  approvedBy     User?               @relation("PurchaseOrderApprovedBy", fields: [approvedById], references: [id])
+  duplicatedFrom PurchaseOrder?      @relation("LpoDuplicate", fields: [duplicatedFromId], references: [id])
+  duplicates     PurchaseOrder[]     @relation("LpoDuplicate")
+  lines          PurchaseOrderLine[]
+  receipts       GoodsReceipt[]
 
   @@unique([tenantId, lpoNumber])
   @@index([tenantId])
@@ -879,6 +906,7 @@ model GoodsReceipt {
   deliveryNote    String?
   invoiceNumber   String?
   notes           String?
+  clientRequestId String?
   receivedById    String
   receivedAt      DateTime @default(now())
   createdAt       DateTime @default(now())
@@ -889,6 +917,7 @@ model GoodsReceipt {
   lines        GoodsReceiptLine[]
 
   @@unique([tenantId, grnNumber])
+  @@unique([tenantId, clientRequestId])
   @@index([tenantId])
   @@index([purchaseOrderId])
 }
@@ -973,6 +1002,25 @@ model InboxNotification {
 
   @@unique([tenantId, userId, type, entityId])
   @@index([tenantId, userId, createdAt])
+}
+
+model ImportBatch {
+  id             String   @id @default(uuid())
+  tenantId       String
+  kind           String
+  sourceHash     String
+  sourceFilename String?
+  dryRun         Boolean  @default(true)
+  summary        Json?
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User   @relation("ImportBatchCreatedBy", fields: [createdById], references: [id])
+
+  @@index([tenantId, kind, sourceHash])
+  // Posted OPENING_STOCK uniqueness is a partial unique index in SQL:
+  // ImportBatch_opening_stock_posted_uniq on (tenantId, sourceHash) WHERE kind='OPENING_STOCK' AND dryRun=false
 }
 
 model CatalogueImportMap {

@@ -2,22 +2,18 @@ import request from "supertest";
 import { PrismaClient, Role } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { createApp } from "../src/app.js";
+import { assertIsolatedTestDatabase } from "../src/lib/testDatabase.js";
 
 export const prisma = new PrismaClient();
 export const app = createApp();
 
 export async function resetDb() {
-  const url = process.env.DATABASE_URL || "";
-  const isolated = /clinicflow_test|_test\b|\/test\b/i.test(url);
-  if (!isolated) {
-    throw new Error(
-      "Refusing to truncate. Point DATABASE_URL at an isolated clinicflow_test database before running tests.",
-    );
-  }
+  assertIsolatedTestDatabase(process.env.DATABASE_URL || "");
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "InboxNotification",
       "CatalogueImportMap",
+      "ImportBatch",
       "SmsMessage",
       "SmsCampaign",
       "EmailRecord",

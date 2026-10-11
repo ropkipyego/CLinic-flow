@@ -4,8 +4,7 @@ import { param } from "../lib/params.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 import { created, ok } from "../lib/response.js";
 import { z } from "zod";
-import { env } from "../config/env.js";
-import { badRequest } from "../lib/errors.js";
+import { assertCatalogueWritesAllowed } from "../lib/catalogueWriteGuard.js";
 import {
   createPrescription,
   dispensePrescription,
@@ -26,7 +25,13 @@ import {
   sellingPricePatchSchema,
   updateMedicineSellingPrice,
 } from "../services/pharmacyService.js";
-import { importPharmacyCatalogue, parseCatalogueRows } from "../services/pharmacyCatalogueImport.js";
+import {
+  importOpeningStock,
+  importPharmacyCatalogue,
+  parseCatalogueCsv,
+  parseCatalogueRows,
+  type HeaderMapping,
+} from "../services/pharmacyCatalogueImport.js";
 
 export const pharmacyRouter = Router();
 pharmacyRouter.use(authenticate);
@@ -126,15 +131,30 @@ pharmacyRouter.post(
 pharmacyRouter.post(
   "/medicines/import",
   authorize("ADMIN", "PHARMACY"),
-  asyncHandler(async (req, res) =>
-    created(res, await importMedicines(req.user!.tenantId, req.user!.id, importMedicinesSchema.parse(req.body))),
-  ),
+  asyncHandler(async (req, res) => {
+    assertCatalogueWritesAllowed();
+    return created(res, await importMedicines(req.user!.tenantId, req.user!.id, importMedicinesSchema.parse(req.body)));
+  }),
 );
 
 const catalogueImportBody = z.object({
-  rows: z.array(z.record(z.string(), z.any())),
+  rows: z.array(z.record(z.string(), z.any())).optional(),
+  csvText: z.string().optional(),
+  mapping: z.record(z.string(), z.string()).optional(),
   dryRun: z.boolean().optional(),
+  sourceFilename: z.string().optional().nullable(),
+  sourceHash: z.string().optional().nullable(),
 });
+
+pharmacyRouter.post(
+  "/catalogue/parse",
+  authorize("ADMIN", "PHARMACY"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ csvText: z.string().min(1) }).parse(req.body);
+    const parsed = parseCatalogueCsv(body.csvText);
+    return ok(res, parsed);
+  }),
+);
 
 pharmacyRouter.post(
   "/catalogue/import",
@@ -142,19 +162,57 @@ pharmacyRouter.post(
   asyncHandler(async (req, res) => {
     const body = catalogueImportBody.parse(req.body);
     const dryRun = body.dryRun !== false;
-    if (!dryRun && (env.isProduction || !env.catalogueImportWrite)) {
-      throw badRequest(
-        "Catalogue write is blocked. Run a dry-run, review the report, then set CATALOGUE_IMPORT_WRITE=true in a non-production approval window. Workbook quantities are never imported.",
-      );
-    }
-    const rows = parseCatalogueRows(body.rows);
+    if (!dryRun) assertCatalogueWritesAllowed();
+    const mapping = body.mapping as HeaderMapping | undefined;
+    const rows = body.csvText
+      ? parseCatalogueCsv(body.csvText, mapping).rows
+      : parseCatalogueRows(body.rows ?? [], mapping);
     const report = await importPharmacyCatalogue({
       tenantId: req.user!.tenantId,
       actorId: req.user!.id,
       rows,
       dryRun,
+      sourceFilename: body.sourceFilename,
+      sourceHash: body.sourceHash,
     });
     return ok(res, report);
+  }),
+);
+
+pharmacyRouter.post(
+  "/catalogue/opening-stock",
+  authorize("ADMIN", "PHARMACY"),
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({
+        csvText: z.string().optional(),
+        rows: z.array(z.record(z.string(), z.any())).optional(),
+        mapping: z.record(z.string(), z.string()).optional(),
+        reason: z.string().min(3),
+        dryRun: z.boolean().optional(),
+        sourceFilename: z.string().optional().nullable(),
+        sourceHash: z.string().min(8),
+      })
+      .parse(req.body);
+    const dryRun = body.dryRun !== false;
+    if (!dryRun) assertCatalogueWritesAllowed();
+    const mapping = body.mapping as HeaderMapping | undefined;
+    const rows = body.csvText
+      ? parseCatalogueCsv(body.csvText, mapping).rows
+      : parseCatalogueRows(body.rows ?? [], mapping);
+    return ok(
+      res,
+      await importOpeningStock({
+        tenantId: req.user!.tenantId,
+        actorId: req.user!.id,
+        role: req.user!.role,
+        rows,
+        reason: body.reason,
+        dryRun,
+        sourceFilename: body.sourceFilename,
+        sourceHash: body.sourceHash,
+      }),
+    );
   }),
 );
 

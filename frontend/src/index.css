@@ -30,3 +30,12 @@ button {
 ::selection {
   background: color-mix(in srgb, var(--brand) 22%, white);
 }
+
+@media print {
+  nav, aside, .no-print, header, button {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+}

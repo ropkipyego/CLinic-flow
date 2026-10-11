@@ -17,6 +17,10 @@ export const updateTenantSchema = z.object({
   smsSenderId: z.string().nullable().optional(),
   timezone: z.string().min(1).optional(),
   currency: z.string().min(3).max(8).optional(),
+  taxPin: z.string().nullable().optional(),
+  lpoDeliveryLocation: z.string().nullable().optional(),
+  lpoPaymentTerms: z.string().nullable().optional(),
+  lpoStandardTerms: z.string().nullable().optional(),
 });
 
 export async function getTenant(tenantId: string) {

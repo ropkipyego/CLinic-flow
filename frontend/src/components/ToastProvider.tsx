@@ -7,6 +7,7 @@ type Toast = {
   kind: ToastKind;
   message: string;
   duration: number;
+  persistent: boolean;
 };
 
 type ToastContextValue = {
@@ -18,10 +19,17 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
 
-  const push = useCallback((message: string, kind: ToastKind = "info", duration = 5000) => {
-    const id = crypto.randomUUID();
-    setItems((list) => [...list, { id, kind, message, duration }]);
-    window.setTimeout(() => setItems((list) => list.filter((t) => t.id !== id)), duration);
+  const push = useCallback((message: string, kind: ToastKind = "info", duration?: number) => {
+    const persistent = kind === "error" && (duration === undefined || duration === 0);
+    const ms = duration ?? (kind === "error" ? 12000 : 5000);
+    setItems((list) => {
+      if (list.some((t) => t.message === message && t.kind === kind)) return list;
+      const id = crypto.randomUUID();
+      if (!persistent) {
+        window.setTimeout(() => setItems((cur) => cur.filter((t) => t.id !== id)), ms);
+      }
+      return [...list, { id, kind, message, duration: ms, persistent }];
+    });
   }, []);
 
   const value = useMemo(() => ({ push }), [push]);
@@ -56,12 +64,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 Close
               </button>
             </div>
-            <div
-              className={`h-1 ${
-                t.kind === "success" ? "bg-emerald-500" : t.kind === "error" ? "bg-red-500" : t.kind === "warning" ? "bg-amber-500" : "bg-sky-500"
-              }`}
-              style={{ animation: `clinicflow-toast ${t.duration}ms linear forwards` }}
-            />
+            {t.persistent ? null : (
+              <div
+                className={`h-1 ${
+                  t.kind === "success" ? "bg-emerald-500" : t.kind === "error" ? "bg-red-500" : t.kind === "warning" ? "bg-amber-500" : "bg-sky-500"
+                }`}
+                style={{ animation: `clinicflow-toast ${t.duration}ms linear forwards` }}
+              />
+            )}
           </div>
         ))}
       </div>

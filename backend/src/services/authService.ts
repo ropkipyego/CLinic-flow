@@ -143,6 +143,10 @@ export function serializeTenant(tenant: {
   smsSenderId: string | null;
   timezone: string;
   currency: string;
+  taxPin?: string | null;
+  lpoDeliveryLocation?: string | null;
+  lpoPaymentTerms?: string | null;
+  lpoStandardTerms?: string | null;
 }) {
   return {
     id: tenant.id,
@@ -159,5 +163,9 @@ export function serializeTenant(tenant: {
     smsSenderId: tenant.smsSenderId,
     timezone: tenant.timezone,
     currency: tenant.currency,
+    taxPin: tenant.taxPin ?? null,
+    lpoDeliveryLocation: tenant.lpoDeliveryLocation ?? null,
+    lpoPaymentTerms: tenant.lpoPaymentTerms ?? null,
+    lpoStandardTerms: tenant.lpoStandardTerms ?? null,
   };
 }

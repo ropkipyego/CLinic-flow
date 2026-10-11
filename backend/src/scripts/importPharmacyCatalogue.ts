@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { env } from "../config/env.js";
+import { catalogueWritesBlocked } from "../lib/catalogueWriteGuard.js";
 import { prisma } from "../lib/prisma.js";
 import { importPharmacyCatalogue, parseCatalogueRows } from "../services/pharmacyCatalogueImport.js";
 
@@ -68,8 +68,8 @@ async function main() {
     console.error("Usage: tsx src/scripts/importPharmacyCatalogue.ts --file <xlsx> --tenant-slug <slug> [--write]");
     process.exit(1);
   }
-  if (hasFlag("--write") && (env.isProduction || !env.catalogueImportWrite)) {
-    console.error("Refusing to write catalogue import. Production is blocked; non-production writes require CATALOGUE_IMPORT_WRITE=true.");
+  if (hasFlag("--write") && catalogueWritesBlocked()) {
+    console.error("Refusing to write catalogue import. Production never allows writes; non-production requires CATALOGUE_IMPORT_WRITE=true.");
     process.exit(1);
   }
   const tenant = await prisma.tenant.findUnique({ where: { slug } });

@@ -37,20 +37,20 @@ export function StockItemsPanel({
           dosageForm: existing.dosageForm,
           unit: existing.unit,
           sku: existing.sku,
-          sellingPrice: Number(existing.sellingPrice),
+          sellingPrice: existing.sellingPrice === "" || existing.sellingPrice == null ? null : Number(existing.sellingPrice),
           costPrice: Number(existing.costPrice),
           reorderLevel: Number(existing.reorderLevel),
           active: existing.active,
         }
       : {
           ...form,
-          sellingPrice: Number(form.sellingPrice),
+          sellingPrice: form.sellingPrice.trim() === "" ? null : Number(form.sellingPrice),
           costPrice: Number(form.costPrice || 0),
           reorderLevel: Number(form.reorderLevel || 10),
           sku: form.sku.toUpperCase(),
         };
-    if (!body.name || !body.sku || Number.isNaN(body.sellingPrice)) {
-      onError("Name, SKU, and selling price are required.");
+    if (!body.name || !body.sku || (body.sellingPrice !== null && Number.isNaN(body.sellingPrice))) {
+      onError("Name and ATEN/SKU are required. Selling price may be left blank until configured.");
       return;
     }
     try {
@@ -80,7 +80,7 @@ export function StockItemsPanel({
           <Field label="Name"><input className={inputClass} value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} required /></Field>
           <Field label="Generic"><input className={inputClass} value={form.genericName} onChange={(e) => setForm((s) => ({ ...s, genericName: e.target.value }))} /></Field>
           <Field label="Strength"><input className={inputClass} value={form.strength} onChange={(e) => setForm((s) => ({ ...s, strength: e.target.value }))} /></Field>
-          <Field label="SKU"><input className={inputClass} value={form.sku} onChange={(e) => setForm((s) => ({ ...s, sku: e.target.value }))} required /></Field>
+          <Field label="ATEN / SKU"><input className={inputClass} value={form.sku} onChange={(e) => setForm((s) => ({ ...s, sku: e.target.value }))} required /></Field>
           <Field label="Form"><input className={inputClass} value={form.dosageForm} onChange={(e) => setForm((s) => ({ ...s, dosageForm: e.target.value }))} /></Field>
           <Field label="Unit"><input className={inputClass} value={form.unit} onChange={(e) => setForm((s) => ({ ...s, unit: e.target.value }))} /></Field>
           <Field label="Selling price"><input className={inputClass} value={form.sellingPrice} onChange={(e) => setForm((s) => ({ ...s, sellingPrice: e.target.value }))} required /></Field>

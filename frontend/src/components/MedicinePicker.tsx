@@ -46,7 +46,7 @@ export function MedicineSelect({
         className={inputClass}
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search name, generic, or SKU"
+        placeholder="Search name, generic, or ATEN / SKU"
       />
       <select className={inputClass} value={value} onChange={(e) => onChange(e.target.value)} required={required}>
         <option value="">{options.length ? "Select medicine" : "No match in the clinic list"}</option>
@@ -54,7 +54,8 @@ export function MedicineSelect({
           <option key={m.id} value={m.id}>
             {m.name}
             {m.strength ? ` ${m.strength}` : ""}
-            {m.dosageForm ? ` · ${m.dosageForm}` : ""} — {m.sellingPrice ?? ""} ({m.quantityOnHand ?? 0} on hand)
+            {m.sku ? ` · ${m.sku}` : ""}
+            {m.dosageForm ? ` · ${m.dosageForm}` : ""} — sell {m.sellingPrice ?? "unset"} ({m.quantityOnHand ?? 0} on hand)
           </option>
         ))}
       </select>

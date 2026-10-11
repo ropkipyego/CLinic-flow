@@ -30,6 +30,7 @@ export const ROLE_RIGHTS = [
   { area: "Pharmacy stock items and import", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
   { area: "Stock take, LPO/GRN, inventory movements", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
   { area: "Issue LPO and receive GRN", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
+  { area: "Approve LPO", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: false },
   { area: "Stock take", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
   { area: "Collect payment", SUPER_ADMIN: true, ADMIN: true, RECEPTION: true, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: true },
   { area: "Search and change prices", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: false },

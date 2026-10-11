@@ -77,7 +77,7 @@ export function StockImportPanel({
       <h2 className="text-sm font-semibold">Import stock items</h2>
       <p className="text-sm text-slate-500">
         CSV columns: sku, name, genericName, strength, dosageForm, unit, sellingPrice, costPrice, reorderLevel, quantity.
-        Matching SKUs update the item. Leave opening stock unticked unless you intend to receive shelf quantity. The Excel catalogue dry-run is under Stock → Excel dry-run.
+        Matching SKUs update the item. This legacy write path is blocked in production and requires CATALOGUE_IMPORT_WRITE outside production. Opening stock must use the dedicated opening-stock import.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" onClick={downloadTemplate}>Download template</Button>

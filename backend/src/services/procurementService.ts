@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { prisma } from "../lib/prisma.js";
+import { prisma, type TxClient } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
 import { badRequest, notFound } from "../lib/errors.js";
+import { isUniqueConstraintError } from "../lib/prismaErrors.js";
 import { money } from "../lib/serialize.js";
 import { nextGrnNumber, nextLpoNumber, nextStockTakeNumber } from "../lib/sequences.js";
 import { moveStock } from "./pharmacyService.js";
@@ -11,29 +12,38 @@ export const supplierSchema = z.object({
   phone: z.string().optional().nullable(),
   email: z.string().email().optional().nullable().or(z.literal("")),
   location: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  address: z.string().optional().nullable(),
+  taxPin: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   active: z.boolean().optional(),
+});
+
+const lpoLineSchema = z.object({
+  medicineId: z.string().uuid(),
+  quantityOrdered: z.number().int().positive(),
+  unitCost: z.number().nonnegative(),
 });
 
 export const purchaseOrderSchema = z.object({
   supplierId: z.string().min(1),
   notes: z.string().optional().nullable(),
   expectedDate: z.string().optional().nullable(),
-  lines: z
-    .array(
-      z.object({
-        medicineId: z.string().uuid(),
-        quantityOrdered: z.number().int().positive(),
-        unitCost: z.number().nonnegative(),
-      }),
-    )
-    .min(1),
+  orderDate: z.string().optional().nullable(),
+  deliveryLocation: z.string().optional().nullable(),
+  paymentTerms: z.string().optional().nullable(),
+  deliveryInstructions: z.string().optional().nullable(),
+  quotationNumber: z.string().optional().nullable(),
+  taxPercent: z.number().min(0).max(100).optional(),
+  deliveryCharge: z.number().nonnegative().optional(),
+  lines: z.array(lpoLineSchema).min(1),
 });
 
 export const receiveSchema = z.object({
   deliveryNote: z.string().optional().nullable(),
   invoiceNumber: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
+  clientRequestId: z.string().uuid().optional().nullable(),
   lines: z
     .array(
       z.object({
@@ -62,15 +72,45 @@ export const stockTakeCountSchema = z.object({
   ),
 });
 
+const poInclude = {
+  supplier: true,
+  createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  approvedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+  lines: { include: { medicine: { select: { name: true, sku: true, unit: true } } } },
+  receipts: { select: { id: true, grnNumber: true, receivedAt: true, deliveryNote: true, invoiceNumber: true } },
+} as const;
+
 function serializePo(po: {
   id: string;
   lpoNumber: string;
   status: string;
   notes: string | null;
   expectedDate: Date | null;
+  orderDate?: Date | null;
   issuedAt: Date | null;
+  submittedAt?: Date | null;
+  approvedAt?: Date | null;
+  deliveryLocation?: string | null;
+  paymentTerms?: string | null;
+  deliveryInstructions?: string | null;
+  quotationNumber?: string | null;
+  taxPercent?: { toString(): string } | number;
+  deliveryCharge?: { toString(): string } | number;
+  reprintCount?: number;
+  duplicatedFromId?: string | null;
   createdAt: Date;
-  supplier: { id: string; name: string; phone: string | null };
+  supplier: {
+    id: string;
+    name: string;
+    phone: string | null;
+    email?: string | null;
+    address?: string | null;
+    contactName?: string | null;
+    taxPin?: string | null;
+    location?: string | null;
+  };
+  createdBy?: { firstName: string; lastName: string; email: string } | null;
+  approvedBy?: { firstName: string; lastName: string; email: string } | null;
   lines: Array<{
     id: string;
     medicineId: string;
@@ -81,14 +121,36 @@ function serializePo(po: {
   }>;
   receipts?: Array<{ id: string; grnNumber: string; receivedAt: Date }>;
 }) {
+  const lines = po.lines.map((line) => {
+    const unitCost = money(line.unitCost as never);
+    const outstanding = Math.max(0, line.quantityOrdered - line.quantityReceived);
+    return {
+      ...line,
+      unitCost,
+      lineTotal: Number((unitCost * line.quantityOrdered).toFixed(2)),
+      outstanding,
+    };
+  });
+  const subtotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
+  const taxPercent = money(po.taxPercent as never);
+  const deliveryCharge = money(po.deliveryCharge as never);
+  const taxAmount = Number(((subtotal * taxPercent) / 100).toFixed(2));
   return {
     ...po,
     expectedDate: po.expectedDate ? po.expectedDate.toISOString().slice(0, 10) : null,
-    lines: po.lines.map((line) => ({
-      ...line,
-      unitCost: money(line.unitCost as never),
-      outstanding: Math.max(0, line.quantityOrdered - line.quantityReceived),
-    })),
+    orderDate: po.orderDate ? po.orderDate.toISOString().slice(0, 10) : po.createdAt.toISOString().slice(0, 10),
+    taxPercent,
+    deliveryCharge,
+    reprintCount: po.reprintCount ?? 0,
+    duplicated: Boolean(po.duplicatedFromId),
+    reprint: (po.reprintCount ?? 0) > 0,
+    lines,
+    totals: {
+      subtotal: Number(subtotal.toFixed(2)),
+      taxAmount,
+      deliveryCharge,
+      grandTotal: Number((subtotal + taxAmount + deliveryCharge).toFixed(2)),
+    },
   };
 }
 
@@ -110,6 +172,9 @@ export async function upsertSupplier(
     phone: input.phone?.trim() || null,
     email: input.email?.trim() || null,
     location: input.location?.trim() || null,
+    contactName: input.contactName?.trim() || null,
+    address: input.address?.trim() || null,
+    taxPin: input.taxPin?.trim() || null,
     notes: input.notes?.trim() || null,
     active: input.active ?? true,
   };
@@ -129,14 +194,35 @@ export async function upsertSupplier(
   return supplier;
 }
 
-export async function listPurchaseOrders(tenantId: string) {
+export async function listPurchaseOrders(
+  tenantId: string,
+  filters?: { q?: string; status?: string; supplierId?: string; from?: string; to?: string },
+) {
+  const q = filters?.q?.trim();
   const rows = await prisma.purchaseOrder.findMany({
-    where: { tenantId },
-    include: {
-      supplier: { select: { id: true, name: true, phone: true } },
-      lines: { include: { medicine: { select: { name: true, sku: true, unit: true } } } },
-      receipts: { select: { id: true, grnNumber: true, receivedAt: true } },
+    where: {
+      tenantId,
+      ...(filters?.status ? { status: filters.status as never } : {}),
+      ...(filters?.supplierId ? { supplierId: filters.supplierId } : {}),
+      ...(filters?.from || filters?.to
+        ? {
+            orderDate: {
+              ...(filters.from ? { gte: new Date(filters.from) } : {}),
+              ...(filters.to ? { lte: new Date(filters.to) } : {}),
+            },
+          }
+        : {}),
+      ...(q
+        ? {
+            OR: [
+              { lpoNumber: { contains: q, mode: "insensitive" } },
+              { quotationNumber: { contains: q, mode: "insensitive" } },
+              { supplier: { name: { contains: q, mode: "insensitive" } } },
+            ],
+          }
+        : {}),
     },
+    include: poInclude,
     orderBy: { createdAt: "desc" },
   });
   return rows.map(serializePo);
@@ -145,11 +231,7 @@ export async function listPurchaseOrders(tenantId: string) {
 export async function getPurchaseOrder(tenantId: string, id: string) {
   const po = await prisma.purchaseOrder.findFirst({
     where: { id, tenantId },
-    include: {
-      supplier: { select: { id: true, name: true, phone: true } },
-      lines: { include: { medicine: { select: { name: true, sku: true, unit: true } } } },
-      receipts: { select: { id: true, grnNumber: true, receivedAt: true } },
-    },
+    include: poInclude,
   });
   if (!po) throw notFound("Purchase order not found.");
   return serializePo(po);
@@ -175,9 +257,15 @@ export async function createPurchaseOrder(
         supplierId: input.supplierId,
         notes: input.notes?.trim() || null,
         expectedDate: input.expectedDate ? new Date(input.expectedDate) : null,
+        orderDate: input.orderDate ? new Date(input.orderDate) : new Date(),
+        deliveryLocation: input.deliveryLocation?.trim() || null,
+        paymentTerms: input.paymentTerms?.trim() || null,
+        deliveryInstructions: input.deliveryInstructions?.trim() || null,
+        quotationNumber: input.quotationNumber?.trim() || null,
+        taxPercent: input.taxPercent ?? 0,
+        deliveryCharge: input.deliveryCharge ?? 0,
         createdById: actorId,
-        status: "ISSUED",
-        issuedAt: new Date(),
+        status: "DRAFT",
         lines: {
           create: input.lines.map((line) => ({
             tenantId,
@@ -187,11 +275,7 @@ export async function createPurchaseOrder(
           })),
         },
       },
-      include: {
-        supplier: { select: { id: true, name: true, phone: true } },
-        lines: { include: { medicine: { select: { name: true, sku: true, unit: true } } } },
-        receipts: { select: { id: true, grnNumber: true, receivedAt: true } },
-      },
+      include: poInclude,
     });
     await writeAudit(
       {
@@ -200,7 +284,7 @@ export async function createPurchaseOrder(
         action: "purchase_order.created",
         entity: "purchase_order",
         entityId: created.id,
-        metadata: { lpoNumber },
+        metadata: { lpoNumber, status: "DRAFT" },
       },
       tx,
     );
@@ -209,28 +293,202 @@ export async function createPurchaseOrder(
   return serializePo(po);
 }
 
-export async function cancelPurchaseOrder(tenantId: string, actorId: string, id: string) {
+export async function updatePurchaseOrder(
+  tenantId: string,
+  actorId: string,
+  id: string,
+  input: z.infer<typeof purchaseOrderSchema>,
+) {
+  const existing = await prisma.purchaseOrder.findFirst({ where: { id, tenantId }, include: { lines: true } });
+  if (!existing) throw notFound("Purchase order not found.");
+  if (existing.status !== "DRAFT") throw badRequest("Only a draft LPO can be edited.");
+  const supplier = await prisma.supplier.findFirst({ where: { id: input.supplierId, tenantId, active: true } });
+  if (!supplier) throw notFound("Supplier not found.");
+  await prisma.$transaction(async (tx) => {
+    await tx.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: id } });
+    await tx.purchaseOrder.update({
+      where: { id },
+      data: {
+        supplierId: input.supplierId,
+        notes: input.notes?.trim() || null,
+        expectedDate: input.expectedDate ? new Date(input.expectedDate) : null,
+        orderDate: input.orderDate ? new Date(input.orderDate) : existing.orderDate,
+        deliveryLocation: input.deliveryLocation?.trim() || null,
+        paymentTerms: input.paymentTerms?.trim() || null,
+        deliveryInstructions: input.deliveryInstructions?.trim() || null,
+        quotationNumber: input.quotationNumber?.trim() || null,
+        taxPercent: input.taxPercent ?? 0,
+        deliveryCharge: input.deliveryCharge ?? 0,
+        lines: {
+          create: input.lines.map((line) => ({
+            tenantId,
+            medicineId: line.medicineId,
+            quantityOrdered: line.quantityOrdered,
+            unitCost: line.unitCost,
+          })),
+        },
+      },
+    });
+    await writeAudit(
+      { tenantId, userId: actorId, action: "purchase_order.updated", entity: "purchase_order", entityId: id },
+      tx,
+    );
+  });
+  return getPurchaseOrder(tenantId, id);
+}
+
+async function lockPurchaseOrder(tx: TxClient, tenantId: string, id: string) {
+  const locked = await tx.$queryRaw<Array<{ id: string; status: string; lpoNumber: string }>>`
+    SELECT id, status, "lpoNumber" FROM "PurchaseOrder"
+    WHERE id = ${id} AND "tenantId" = ${tenantId}
+    FOR UPDATE
+  `;
+  const header = locked[0];
+  if (!header) throw notFound("Purchase order not found.");
+  return header;
+}
+
+async function transitionLpo(
+  tenantId: string,
+  actorId: string,
+  id: string,
+  from: Array<"DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "ISSUED" | "PARTIAL">,
+  to: "PENDING_APPROVAL" | "APPROVED" | "ISSUED" | "CANCELLED",
+  action: string,
+  extra: Record<string, unknown> = {},
+) {
+  await prisma.$transaction(async (tx) => {
+    const header = await lockPurchaseOrder(tx, tenantId, id);
+    if (!from.includes(header.status as never)) {
+      throw badRequest(`LPO ${header.lpoNumber} cannot move from ${header.status} to ${to}.`);
+    }
+    await tx.purchaseOrder.update({ where: { id }, data: { status: to, ...extra } });
+    await writeAudit(
+      {
+        tenantId,
+        userId: actorId,
+        action,
+        entity: "purchase_order",
+        entityId: id,
+        metadata: { from: header.status, to },
+      },
+      tx,
+    );
+  });
+  return getPurchaseOrder(tenantId, id);
+}
+
+export async function submitPurchaseOrder(tenantId: string, actorId: string, id: string) {
+  return transitionLpo(tenantId, actorId, id, ["DRAFT"], "PENDING_APPROVAL", "purchase_order.submitted", {
+    submittedAt: new Date(),
+  });
+}
+
+export async function approvePurchaseOrder(tenantId: string, actorId: string, role: string, id: string) {
+  if (role !== "SUPER_ADMIN" && role !== "ADMIN") throw badRequest("Only a clinic administrator can approve an LPO.");
+  return transitionLpo(tenantId, actorId, id, ["PENDING_APPROVAL"], "APPROVED", "purchase_order.approved", {
+    approvedAt: new Date(),
+    approvedById: actorId,
+  });
+}
+
+export async function issuePurchaseOrder(tenantId: string, actorId: string, id: string) {
+  return transitionLpo(tenantId, actorId, id, ["APPROVED"], "ISSUED", "purchase_order.issued", {
+    issuedAt: new Date(),
+  });
+}
+
+export async function duplicatePurchaseOrder(tenantId: string, actorId: string, id: string) {
+  const po = await prisma.purchaseOrder.findFirst({
+    where: { id, tenantId },
+    include: { lines: true },
+  });
+  if (!po) throw notFound("Purchase order not found.");
+  const copy = await prisma.$transaction(async (tx) => {
+    const lpoNumber = await nextLpoNumber(tx, tenantId);
+    const created = await tx.purchaseOrder.create({
+      data: {
+        tenantId,
+        lpoNumber,
+        supplierId: po.supplierId,
+        status: "DRAFT",
+        notes: po.notes,
+        expectedDate: po.expectedDate,
+        orderDate: new Date(),
+        deliveryLocation: po.deliveryLocation,
+        paymentTerms: po.paymentTerms,
+        deliveryInstructions: po.deliveryInstructions,
+        quotationNumber: po.quotationNumber,
+        taxPercent: po.taxPercent,
+        deliveryCharge: po.deliveryCharge,
+        duplicatedFromId: po.id,
+        createdById: actorId,
+        lines: {
+          create: po.lines.map((line) => ({
+            tenantId,
+            medicineId: line.medicineId,
+            quantityOrdered: line.quantityOrdered,
+            unitCost: line.unitCost,
+          })),
+        },
+      },
+      include: poInclude,
+    });
+    await writeAudit(
+      {
+        tenantId,
+        userId: actorId,
+        action: "purchase_order.duplicated",
+        entity: "purchase_order",
+        entityId: created.id,
+        metadata: { from: po.lpoNumber, lpoNumber },
+      },
+      tx,
+    );
+    return created;
+  });
+  return serializePo(copy);
+}
+
+export async function recordLpoReprint(tenantId: string, actorId: string, id: string) {
   const po = await prisma.purchaseOrder.findFirst({ where: { id, tenantId } });
   if (!po) throw notFound("Purchase order not found.");
-  if (po.status === "RECEIVED") throw badRequest("A fully received LPO cannot be cancelled.");
-  if (po.status === "CANCELLED") throw badRequest("This LPO is already cancelled.");
-  const updated = await prisma.purchaseOrder.update({
-    where: { id },
-    data: { status: "CANCELLED" },
-    include: {
-      supplier: { select: { id: true, name: true, phone: true } },
-      lines: { include: { medicine: { select: { name: true, sku: true, unit: true } } } },
-      receipts: { select: { id: true, grnNumber: true, receivedAt: true } },
-    },
-  });
+  await prisma.purchaseOrder.update({ where: { id }, data: { reprintCount: { increment: 1 } } });
   await writeAudit({
     tenantId,
     userId: actorId,
-    action: "purchase_order.cancelled",
+    action: "purchase_order.reprinted",
     entity: "purchase_order",
     entityId: id,
+    metadata: { lpoNumber: po.lpoNumber },
   });
-  return serializePo(updated);
+  return getPurchaseOrder(tenantId, id);
+}
+
+export async function cancelPurchaseOrder(tenantId: string, actorId: string, id: string) {
+  await prisma.$transaction(async (tx) => {
+    const header = await lockPurchaseOrder(tx, tenantId, id);
+    if (header.status === "CANCELLED") throw badRequest("This LPO is already cancelled.");
+    if (header.status === "PARTIAL" || header.status === "RECEIVED") {
+      throw badRequest("An LPO that has received goods cannot be cancelled.");
+    }
+    const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: id } });
+    if (lines.some((l) => l.quantityReceived > 0)) {
+      throw badRequest("An LPO that has received goods cannot be cancelled.");
+    }
+    await tx.purchaseOrder.update({ where: { id }, data: { status: "CANCELLED" } });
+    await writeAudit(
+      {
+        tenantId,
+        userId: actorId,
+        action: "purchase_order.cancelled",
+        entity: "purchase_order",
+        entityId: id,
+      },
+      tx,
+    );
+  });
+  return getPurchaseOrder(tenantId, id);
 }
 
 export async function receivePurchaseOrder(
@@ -240,16 +498,39 @@ export async function receivePurchaseOrder(
   input: z.infer<typeof receiveSchema>,
 ) {
   const incoming = input.lines.filter((l) => l.quantityReceived > 0 || (l.quantityRejected || 0) > 0);
-  if (!incoming.length) throw badRequest("Enter at least one quantity received.");
+  if (!incoming.length) throw badRequest("Enter at least one quantity received against this order.");
 
-  return prisma.$transaction(async (tx) => {
+  async function existingReceiptPo() {
+    if (!input.clientRequestId) return null;
+    const existing = await prisma.goodsReceipt.findFirst({
+      where: { tenantId, clientRequestId: input.clientRequestId },
+    });
+    if (!existing) return null;
+    return getPurchaseOrder(tenantId, existing.purchaseOrderId);
+  }
+
+  const replayed = await existingReceiptPo();
+  if (replayed) return replayed;
+
+  try {
+    const resultId = await prisma.$transaction(async (tx) => {
+    const header = await lockPurchaseOrder(tx, tenantId, purchaseOrderId);
+    if (input.clientRequestId) {
+      const lockedExisting = await tx.goodsReceipt.findFirst({
+        where: { tenantId, clientRequestId: input.clientRequestId },
+      });
+      if (lockedExisting) return lockedExisting.purchaseOrderId;
+    }
+    if (header.status === "CANCELLED") throw badRequest("This LPO was cancelled.");
+    if (header.status === "DRAFT" || header.status === "PENDING_APPROVAL") {
+      throw badRequest("Receive against an issued LPO. Creating or approving an LPO does not increase stock.");
+    }
+    if (header.status === "RECEIVED") throw badRequest("This LPO is already fully received.");
     const po = await tx.purchaseOrder.findFirst({
       where: { id: purchaseOrderId, tenantId },
       include: { lines: true },
     });
     if (!po) throw notFound("Purchase order not found.");
-    if (po.status === "CANCELLED") throw badRequest("This LPO was cancelled.");
-    if (po.status === "RECEIVED") throw badRequest("This LPO is already fully received.");
 
     const grnNumber = await nextGrnNumber(tx, tenantId);
     const receipt = await tx.goodsReceipt.create({
@@ -260,6 +541,7 @@ export async function receivePurchaseOrder(
         deliveryNote: input.deliveryNote?.trim() || null,
         invoiceNumber: input.invoiceNumber?.trim() || null,
         notes: input.notes?.trim() || null,
+        clientRequestId: input.clientRequestId || null,
         receivedById: actorId,
       },
     });
@@ -327,8 +609,16 @@ export async function receivePurchaseOrder(
       tx,
     );
 
-    return receipt.id;
-  }).then(() => getPurchaseOrder(tenantId, purchaseOrderId));
+    return purchaseOrderId;
+  });
+    return getPurchaseOrder(tenantId, resultId);
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      const replay = await existingReceiptPo();
+      if (replay) return replay;
+    }
+    throw err;
+  }
 }
 
 export async function startStockTake(tenantId: string, actorId: string) {
