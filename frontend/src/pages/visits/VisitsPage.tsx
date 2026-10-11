@@ -51,13 +51,23 @@ export function VisitsPage() {
     }
   }
 
+  async function cancelVisit(row: Encounter) {
+    if (!window.confirm(`Cancel ${row.visitNumber}? Paid visits cannot be deleted; unpaid charges on this visit will be voided.`)) return;
+    try {
+      await post(`/encounters/${row.id}/cancel`, {});
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to cancel that visit.");
+    }
+  }
+
   return (
     <div>
       <PageHeader
         title="Today's visits"
         subtitle="Sorted by arrival time. Check a patient into consultation when they are ready."
         actions={
-          <Link to="/patients/new">
+          <Link to="/patients">
             <Button>Register patient</Button>
           </Link>
         }
@@ -94,15 +104,20 @@ export function VisitsPage() {
               <td className={cellClass}><StatusBadge status={e.status} /></td>
               <td className={cellClass}>{e.assignedDoctor?.name || "—"}</td>
               <td className={cellClass}>
-                {e.status === "REGISTERED" ? (
-                  <Button variant="secondary" onClick={() => void checkIn(e.id)}>
-                    Check in
-                  </Button>
-                ) : (
-                  <Link className="text-sm font-medium text-[var(--brand)] hover:underline" to={`/consultation/${e.id}`}>
-                    Open
-                  </Link>
-                )}
+                <div className="flex flex-wrap gap-2">
+                  {e.status === "REGISTERED" ? (
+                    <Button variant="secondary" onClick={() => void checkIn(e.id)}>
+                      Check in
+                    </Button>
+                  ) : e.status !== "CANCELLED" ? (
+                    <Link className="text-sm font-medium text-[var(--brand)] hover:underline" to={`/patients/${e.patient.id}`}>
+                      Open
+                    </Link>
+                  ) : null}
+                  {e.status !== "CANCELLED" && e.status !== "COMPLETED" ? (
+                    <Button variant="ghost" onClick={() => void cancelVisit(e)}>Cancel</Button>
+                  ) : null}
+                </div>
               </td>
             </tr>
           ))}

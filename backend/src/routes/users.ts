@@ -3,14 +3,33 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import { param } from "../lib/params.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 import { created, ok } from "../lib/response.js";
-import { createUser, createUserSchema, listRoleRights, listUsers, updateUser, updateUserSchema } from "../services/userService.js";
+import {
+  adminResetPassword,
+  createUser,
+  createUserSchema,
+  deleteUser,
+  listRoleRights,
+  listUserAudit,
+  listUsers,
+  updateUser,
+  updateUserSchema,
+} from "../services/userService.js";
 
 export const usersRouter = Router();
 usersRouter.use(authenticate, authorize("ADMIN"));
 
 usersRouter.get(
   "/",
-  asyncHandler(async (req, res) => ok(res, await listUsers(req.user!.tenantId))),
+  asyncHandler(async (req, res) =>
+    ok(
+      res,
+      await listUsers(req.user!.tenantId, {
+        q: typeof req.query.q === "string" ? req.query.q : undefined,
+        role: typeof req.query.role === "string" ? req.query.role : undefined,
+        active: typeof req.query.active === "string" ? req.query.active : undefined,
+      }),
+    ),
+  ),
 );
 
 usersRouter.get(
@@ -32,4 +51,23 @@ usersRouter.patch(
     const body = updateUserSchema.parse(req.body);
     return ok(res, await updateUser(req.user!.tenantId, { id: req.user!.id, role: req.user!.role }, param(req, "id"), body, req.ip));
   }),
+);
+
+usersRouter.get(
+  "/:id/audit",
+  asyncHandler(async (req, res) => ok(res, await listUserAudit(req.user!.tenantId, param(req, "id")))),
+);
+
+usersRouter.post(
+  "/:id/password-reset",
+  asyncHandler(async (req, res) =>
+    ok(res, await adminResetPassword(req.user!.tenantId, { id: req.user!.id, role: req.user!.role }, param(req, "id"))),
+  ),
+);
+
+usersRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) =>
+    ok(res, await deleteUser(req.user!.tenantId, { id: req.user!.id, role: req.user!.role }, param(req, "id"), req.ip)),
+  ),
 );

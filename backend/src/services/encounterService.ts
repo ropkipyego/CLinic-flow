@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma, type TxClient } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
 import { badRequest, notFound } from "../lib/errors.js";
+import { isUniqueConstraintError } from "../lib/prismaErrors.js";
 import { nextVisitNumber } from "../lib/sequences.js";
 import { displayName, money, patientAge } from "../lib/serialize.js";
 
@@ -12,6 +13,7 @@ export const createEncounterSchema = z.object({
   notes: z.string().optional().nullable(),
   checkInToConsultation: z.boolean().optional(),
   visitType: z.nativeEnum(VisitType).optional(),
+  clientRequestId: z.string().uuid().optional().nullable(),
 });
 
 const patientSelect = {
@@ -86,6 +88,14 @@ export async function createEncounter(
   const patient = await prisma.patient.findFirst({ where: { id: input.patientId, tenantId } });
   if (!patient) throw notFound("Patient not found.");
 
+  if (input.clientRequestId) {
+    const existing = await prisma.encounter.findFirst({
+      where: { tenantId, clientRequestId: input.clientRequestId },
+      include: { patient: { select: patientSelect }, assignedDoctor: true },
+    });
+    if (existing) return serializeEncounter(existing);
+  }
+
   if (input.assignedDoctorId) {
     const doctor = await prisma.user.findFirst({
       where: { id: input.assignedDoctorId, tenantId, role: { in: ["DOCTOR", "ADMIN", "SUPER_ADMIN"] }, active: true },
@@ -93,36 +103,48 @@ export async function createEncounter(
     if (!doctor) throw badRequest("Assigned doctor was not found in this clinic.");
   }
 
-  const encounter = await prisma.$transaction(async (tx) => {
-    const visitNumber = await nextVisitNumber(tx, tenantId);
-    const created = await tx.encounter.create({
-      data: {
-        tenantId,
-        patientId: input.patientId,
-        visitNumber,
-        createdById: actorId,
-        assignedDoctorId: input.assignedDoctorId ?? null,
-        notes: input.notes ?? null,
-        visitType: input.visitType ?? "STANDARD",
-        status: input.checkInToConsultation ? "WAITING_CONSULTATION" : "REGISTERED",
-      },
-      include: { patient: { select: patientSelect }, assignedDoctor: true },
+  try {
+    const encounter = await prisma.$transaction(async (tx) => {
+      const visitNumber = await nextVisitNumber(tx, tenantId);
+      const created = await tx.encounter.create({
+        data: {
+          tenantId,
+          patientId: input.patientId,
+          visitNumber,
+          createdById: actorId,
+          assignedDoctorId: input.assignedDoctorId ?? null,
+          notes: input.notes ?? null,
+          visitType: input.visitType ?? "STANDARD",
+          status: input.checkInToConsultation ? "WAITING_CONSULTATION" : "REGISTERED",
+          clientRequestId: input.clientRequestId ?? null,
+        },
+        include: { patient: { select: patientSelect }, assignedDoctor: true },
+      });
+      await writeAudit(
+        {
+          tenantId,
+          userId: actorId,
+          action: "encounter.created",
+          entity: "encounter",
+          entityId: created.id,
+          metadata: { visitNumber, patientId: input.patientId },
+          ipAddress: ip,
+        },
+        tx,
+      );
+      return created;
     });
-    await writeAudit(
-      {
-        tenantId,
-        userId: actorId,
-        action: "encounter.created",
-        entity: "encounter",
-        entityId: created.id,
-        metadata: { visitNumber, patientId: input.patientId },
-        ipAddress: ip,
-      },
-      tx,
-    );
-    return created;
-  });
-  return serializeEncounter(encounter);
+    return serializeEncounter(encounter);
+  } catch (err) {
+    if (input.clientRequestId && isUniqueConstraintError(err)) {
+      const existing = await prisma.encounter.findFirst({
+        where: { tenantId, clientRequestId: input.clientRequestId },
+        include: { patient: { select: patientSelect }, assignedDoctor: true },
+      });
+      if (existing) return serializeEncounter(existing);
+    }
+    throw err;
+  }
 }
 
 export async function getEncounter(tenantId: string, encounterId: string) {
@@ -211,7 +233,41 @@ export async function checkInConsultation(
 }
 
 export async function cancelEncounter(tenantId: string, actorId: string, encounterId: string) {
-  return updateEncounterStatus(tenantId, actorId, encounterId, "CANCELLED");
+  const existing = await prisma.encounter.findFirst({
+    where: { id: encounterId, tenantId },
+    include: {
+      patient: { select: patientSelect },
+      assignedDoctor: true,
+      payments: { select: { id: true } },
+      charges: true,
+    },
+  });
+  if (!existing) throw notFound("Visit not found.");
+  if (existing.status === "CANCELLED") return serializeEncounter(existing);
+  if (existing.payments.length) {
+    throw badRequest("This visit has recorded payments. Keep the visit and receipts; do not delete them.");
+  }
+  return prisma.$transaction(async (tx) => {
+    for (const charge of existing.charges) {
+      if (charge.status !== "VOIDED" && money(charge.amountPaid) === 0) {
+        await tx.charge.update({ where: { id: charge.id }, data: { status: "VOIDED" } });
+      }
+    }
+    const encounter = await tx.encounter.update({
+      where: { id: encounterId },
+      data: { status: "CANCELLED" },
+      include: { patient: { select: patientSelect }, assignedDoctor: true },
+    });
+    await writeAudit({
+      tenantId,
+      userId: actorId,
+      action: "encounter.cancelled",
+      entity: "encounter",
+      entityId: encounterId,
+      metadata: { from: existing.status },
+    });
+    return serializeEncounter(encounter);
+  });
 }
 
 export async function refreshEncounterStatus(tx: TxClient, tenantId: string, encounterId: string) {

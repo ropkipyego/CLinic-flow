@@ -27,6 +27,15 @@ button {
   font: inherit;
 }
 
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 ::selection {
   background: color-mix(in srgb, var(--brand) 22%, white);
 }

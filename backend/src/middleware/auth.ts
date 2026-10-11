@@ -17,6 +17,10 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
       where: { id: payload.sub, tenantId: payload.tenantId, active: true },
     });
     if (!user) throw unauthorized("Account is inactive or no longer exists.");
+    const tokenVersion = payload.tv ?? 0;
+    if (tokenVersion !== user.tokenVersion) {
+      throw unauthorized("Session expired. Please sign in again.");
+    }
     req.user = {
       id: user.id,
       tenantId: user.tenantId,

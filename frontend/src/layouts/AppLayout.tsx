@@ -17,17 +17,16 @@ type NavItem = {
 
 const CARE: NavItem[] = [
   { to: "/", label: "Dashboard", roles: ["SUPER_ADMIN", "ADMIN"], icon: "dashboard" },
-  { to: "/visits", label: "Queue", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION"], icon: "visits" },
   { to: "/patients", label: "Patients", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION", "DOCTOR", "CASHIER", "LAB", "PHARMACY"], icon: "patients" },
-  { to: "/patients/new", label: "New patient", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION"], icon: "patients" },
-  { to: "/consultation", label: "Queue", roles: ["SUPER_ADMIN", "ADMIN", "DOCTOR"], icon: "consultation" },
+  { to: "/visits", label: "Visits", roles: ["SUPER_ADMIN", "ADMIN", "RECEPTION"], icon: "visits" },
+  { to: "/consultation", label: "Clinical", roles: ["SUPER_ADMIN", "ADMIN", "DOCTOR"], icon: "consultation" },
 ];
 
 const OPERATIONS: NavItem[] = [
   { to: "/laboratory", label: "Laboratory", roles: ["SUPER_ADMIN", "ADMIN", "LAB", "DOCTOR", "RECEPTION"], icon: "lab" },
   { to: "/pharmacy", label: "Pharmacy", roles: ["SUPER_ADMIN", "ADMIN", "PHARMACY"], icon: "pharmacy" },
   { to: "/inventory", label: "Stock", roles: ["SUPER_ADMIN", "ADMIN", "PHARMACY"], icon: "reports" },
-  { to: "/cashier", label: "Cashier", roles: ["SUPER_ADMIN", "ADMIN", "CASHIER", "RECEPTION"], icon: "cashier" },
+  { to: "/cashier", label: "Billing & payments", roles: ["SUPER_ADMIN", "ADMIN", "CASHIER", "RECEPTION"], icon: "cashier" },
 ];
 
 const ADMIN: NavItem[] = [

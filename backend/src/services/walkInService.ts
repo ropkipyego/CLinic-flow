@@ -107,6 +107,7 @@ export async function findOrCreateWalkInPatient(
       firstName,
       lastName,
       phone,
+      phoneNormalized: digits.length >= 9 ? digits.slice(-9) : digits,
       sex,
       ageYears: client.ageYears ?? null,
       nextOfKin,

@@ -53,11 +53,11 @@ export function PatientsPage() {
     <div>
       <PageHeader
         title="Patient registry"
-        subtitle="Search by number, name, or phone. One file per person — open the existing chart instead of registering again."
+        subtitle="Always search first. Open an existing chart to start another visit. Register only when no match is the same person."
         actions={
           canRegister ? (
-            <Link to="/patients/new">
-              <Button><Icons.userPlus /> Add new patient</Button>
+            <Link to="/patients/new?new=1">
+              <Button><Icons.userPlus /> Register new patient</Button>
             </Link>
           ) : null
         }

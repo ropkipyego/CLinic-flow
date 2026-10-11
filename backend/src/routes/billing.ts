@@ -11,6 +11,7 @@ import {
   serviceSchema,
   updateServicePrice,
   upsertService,
+  removeService,
 } from "../services/catalogService.js";
 import {
   addManualCharge,
@@ -21,6 +22,7 @@ import {
   manualChargeSchema,
   receivePayment,
   receivePaymentSchema,
+  voidCharge,
 } from "../services/billingService.js";
 
 export const servicesRouter = Router();
@@ -67,6 +69,14 @@ servicesRouter.get(
   asyncHandler(async (req, res) => ok(res, await getService(req.user!.tenantId, param(req, "id")))),
 );
 
+servicesRouter.delete(
+  "/:id",
+  authorize("ADMIN"),
+  asyncHandler(async (req, res) =>
+    ok(res, await removeService(req.user!.tenantId, req.user!.id, param(req, "id"))),
+  ),
+);
+
 export const chargesRouter = Router();
 chargesRouter.use(authenticate, authorize("ADMIN", "CASHIER", "RECEPTION"));
 chargesRouter.get(
@@ -83,6 +93,13 @@ chargesRouter.post(
     const body = manualChargeSchema.parse(req.body);
     return created(res, await addManualCharge(req.user!.tenantId, req.user!.id, param(req, "encounterId"), body, req.ip));
   }),
+);
+
+chargesRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) =>
+    ok(res, await voidCharge(req.user!.tenantId, req.user!.id, param(req, "id"), req.ip)),
+  ),
 );
 
 export const paymentsRouter = Router();

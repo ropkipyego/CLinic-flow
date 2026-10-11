@@ -79,9 +79,23 @@ function assertCanAssign(actorRole: Role, targetRole: Role) {
   }
 }
 
-export async function listUsers(tenantId: string) {
+export async function listUsers(tenantId: string, opts?: { q?: string; role?: string; active?: string }) {
+  const q = opts?.q?.trim();
   const users = await prisma.user.findMany({
-    where: { tenantId },
+    where: {
+      tenantId,
+      ...(opts?.role ? { role: opts.role as Role } : {}),
+      ...(opts?.active === "true" ? { active: true } : opts?.active === "false" ? { active: false } : {}),
+      ...(q
+        ? {
+            OR: [
+              { email: { contains: q, mode: "insensitive" } },
+              { firstName: { contains: q, mode: "insensitive" } },
+              { lastName: { contains: q, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    },
     orderBy: [{ role: "asc" }, { lastName: "asc" }, { firstName: "asc" }],
   });
   return users.map(publicUser);
@@ -178,6 +192,7 @@ export async function updateUser(
   if (existing.id === actor.id && input.active === false) {
     throw badRequest("You cannot deactivate your own account.");
   }
+  const revokeSession = input.active === false || Boolean(input.password) || (input.role && input.role !== existing.role);
   if (existing.role === "SUPER_ADMIN" && (input.active === false || (input.role && input.role !== "SUPER_ADMIN"))) {
     const others = await countActiveSuperAdmins(tenantId, userId);
     if (others === 0) {
@@ -194,6 +209,7 @@ export async function updateUser(
       role: input.role,
       active: input.active,
       ...(input.password ? { passwordHash: await hashPassword(input.password) } : {}),
+      ...(revokeSession ? { tokenVersion: { increment: 1 } } : {}),
     },
   });
 
@@ -207,4 +223,109 @@ export async function updateUser(
     ipAddress: ip,
   });
   return publicUser(user);
+}
+
+async function userHistoryCounts(userId: string) {
+  const [
+    createdEncounters,
+    assignedEncounters,
+    consultations,
+    payments,
+    receipts,
+    auditLogs,
+    stockMovements,
+    dispenses,
+    labResults,
+  ] = await Promise.all([
+    prisma.encounter.count({ where: { createdById: userId } }),
+    prisma.encounter.count({ where: { assignedDoctorId: userId } }),
+    prisma.consultation.count({ where: { doctorId: userId } }),
+    prisma.payment.count({ where: { receivedById: userId } }),
+    prisma.receipt.count({ where: { issuedById: userId } }),
+    prisma.auditLog.count({ where: { userId } }),
+    prisma.stockMovement.count({ where: { userId } }),
+    prisma.dispense.count({ where: { pharmacistId: userId } }),
+    prisma.labResult.count({ where: { OR: [{ performedById: userId }, { verifiedById: userId }] } }),
+  ]);
+  return {
+    createdEncounters,
+    assignedEncounters,
+    consultations,
+    payments,
+    receipts,
+    auditLogs,
+    stockMovements,
+    dispenses,
+    labResults,
+    total:
+      createdEncounters +
+      assignedEncounters +
+      consultations +
+      payments +
+      receipts +
+      auditLogs +
+      stockMovements +
+      dispenses +
+      labResults,
+  };
+}
+
+export async function deleteUser(
+  tenantId: string,
+  actor: { id: string; role: Role },
+  userId: string,
+  ip?: string,
+) {
+  const existing = await prisma.user.findFirst({ where: { id: userId, tenantId } });
+  if (!existing) throw notFound("User not found.");
+  if (existing.id === actor.id) throw badRequest("You cannot delete your own account.");
+  if (existing.role === "SUPER_ADMIN" && !isSuperAdmin(actor.role)) {
+    throw forbidden("Only a Super Admin can delete a Super Admin account.");
+  }
+  if (existing.role === "SUPER_ADMIN") {
+    const others = await countActiveSuperAdmins(tenantId, userId);
+    if (others === 0) throw badRequest("This clinic must keep at least one Super Admin.");
+  }
+  const history = await userHistoryCounts(userId);
+  if (history.total > 0) {
+    throw conflict(
+      "This account is linked to clinical or financial records. Deactivate it instead of deleting.",
+      { history },
+    );
+  }
+  await prisma.user.delete({ where: { id: userId } });
+  await writeAudit({
+    tenantId,
+    userId: actor.id,
+    action: "user.deleted",
+    entity: "user",
+    entityId: userId,
+    metadata: { email: existing.email, role: existing.role },
+    ipAddress: ip,
+  });
+  return { deleted: true };
+}
+
+export async function adminResetPassword(
+  tenantId: string,
+  actor: { id: string; role: Role },
+  userId: string,
+) {
+  const existing = await prisma.user.findFirst({ where: { id: userId, tenantId } });
+  if (!existing) throw notFound("User not found.");
+  if (existing.role === "SUPER_ADMIN" && !isSuperAdmin(actor.role)) {
+    throw forbidden("Only a Super Admin can reset a Super Admin password.");
+  }
+  const { requestPasswordReset } = await import("./authService.js");
+  return requestPasswordReset({ email: existing.email });
+}
+
+export async function listUserAudit(tenantId: string, userId: string) {
+  const existing = await prisma.user.findFirst({ where: { id: userId, tenantId } });
+  if (!existing) throw notFound("User not found.");
+  return prisma.auditLog.findMany({
+    where: { tenantId, OR: [{ userId }, { entity: "user", entityId: userId }] },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
 }

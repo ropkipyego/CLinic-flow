@@ -206,6 +206,7 @@ model User {
   lastName     String
   role         Role
   active       Boolean   @default(true)
+  tokenVersion Int       @default(0)
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -261,7 +262,9 @@ model Patient {
   middleName        String?
   lastName          String
   phone             String
+  phoneNormalized   String            @default("")
   alternativePhone  String?
+  clientRequestId   String?
   dateOfBirth       DateTime?         @db.Date
   ageYears          Int?
   sex               Sex
@@ -287,8 +290,10 @@ model Patient {
   receipts          Receipt[]
 
   @@unique([tenantId, patientNumber])
+  @@unique([tenantId, clientRequestId])
   @@index([tenantId])
   @@index([tenantId, phone])
+  @@index([tenantId, phoneNormalized])
   @@index([tenantId, lastName, firstName])
   @@index([tenantId, patientNumber])
 }

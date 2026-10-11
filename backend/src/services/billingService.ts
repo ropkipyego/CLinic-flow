@@ -2,7 +2,7 @@ import { ChargeSource, PaymentMethod, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma, type TxClient } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
-import { badRequest, notFound } from "../lib/errors.js";
+import { badRequest, conflict, notFound } from "../lib/errors.js";
 import { nextReceiptNumber } from "../lib/sequences.js";
 import { money } from "../lib/serialize.js";
 import { refreshEncounterStatus } from "./encounterService.js";
@@ -130,6 +130,35 @@ export async function addManualCharge(
     );
     await refreshEncounterStatus(tx, tenantId, encounterId);
     return serializeCharge(charge);
+  });
+}
+
+export async function voidCharge(tenantId: string, actorId: string, chargeId: string, ip?: string) {
+  return prisma.$transaction(async (tx) => {
+    const charge = await tx.charge.findFirst({ where: { id: chargeId, tenantId } });
+    if (!charge) throw notFound("Charge not found.");
+    if (charge.status === "VOIDED") return serializeCharge(charge);
+    if (money(charge.amountPaid) > 0 || charge.status === "PAID" || charge.status === "PARTIALLY_PAID") {
+      throw conflict("This charge has a payment on it. Keep the receipt; do not delete paid transactions.");
+    }
+    const updated = await tx.charge.update({
+      where: { id: charge.id },
+      data: { status: "VOIDED" },
+    });
+    await writeAudit(
+      {
+        tenantId,
+        userId: actorId,
+        action: "charge.voided",
+        entity: "charge",
+        entityId: charge.id,
+        metadata: { description: charge.description, total: money(charge.total) },
+        ipAddress: ip,
+      },
+      tx,
+    );
+    await refreshEncounterStatus(tx, tenantId, charge.encounterId);
+    return serializeCharge(updated);
   });
 }
 

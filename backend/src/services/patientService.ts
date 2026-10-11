@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
 import { badRequest, conflict, notFound } from "../lib/errors.js";
+import { isUniqueConstraintError } from "../lib/prismaErrors.js";
 import { nextPatientNumber } from "../lib/sequences.js";
 import { displayName, patientAge } from "../lib/serialize.js";
 
@@ -26,6 +27,7 @@ export const createPatientSchema = z
   .object({
     ...patientFields,
     confirmDuplicate: z.boolean().optional(),
+    clientRequestId: z.string().uuid().optional().nullable(),
   })
   .refine(
   (v) => Boolean(v.dateOfBirth) || (v.ageYears !== undefined && v.ageYears !== null),
@@ -86,19 +88,61 @@ export function serializePatient(patient: {
   };
 }
 
-function phoneDigits(phone?: string | null) {
+export function phoneDigits(phone?: string | null) {
   return (phone || "").replace(/\D/g, "");
+}
+
+export function normalizePhoneKey(phone?: string | null) {
+  const digits = phoneDigits(phone);
+  if (digits.length >= 9) return digits.slice(-9);
+  return digits;
+}
+
+function patientSearchWhere(tenantId: string, q?: string, sex?: string) {
+  const query = q?.trim();
+  const digits = normalizePhoneKey(query);
+  const tokens = (query || "").split(/\s+/).filter((t) => t.length > 1);
+  const or: object[] = [];
+  if (query) {
+    or.push(
+      { patientNumber: { contains: query, mode: "insensitive" as const } },
+      { phone: { contains: query } },
+      { alternativePhone: { contains: query } },
+      { firstName: { contains: query, mode: "insensitive" as const } },
+      { lastName: { contains: query, mode: "insensitive" as const } },
+      { middleName: { contains: query, mode: "insensitive" as const } },
+    );
+    if (digits.length >= 7) {
+      or.push({ phoneNormalized: { contains: digits } }, { phone: { contains: digits } }, { alternativePhone: { contains: digits } });
+    }
+    if (tokens.length >= 2) {
+      or.push({
+        AND: [
+          { firstName: { contains: tokens[0], mode: "insensitive" as const } },
+          { lastName: { contains: tokens[tokens.length - 1], mode: "insensitive" as const } },
+        ],
+      });
+    }
+  }
+  return {
+    tenantId,
+    ...(sex ? { sex: sex as never } : {}),
+    ...(or.length ? { OR: or } : {}),
+  };
 }
 
 export async function findPossibleDuplicates(
   tenantId: string,
   input: { phone?: string | null; firstName?: string | null; lastName?: string | null; dateOfBirth?: string | null; excludeId?: string },
 ) {
-  const digits = phoneDigits(input.phone);
-  const last9 = digits.slice(-9);
+  const last9 = normalizePhoneKey(input.phone);
   const or: object[] = [];
   if (last9.length >= 9) {
-    or.push({ phone: { contains: last9 } }, { alternativePhone: { contains: last9 } });
+    or.push(
+      { phoneNormalized: last9 },
+      { phone: { contains: last9 } },
+      { alternativePhone: { contains: last9 } },
+    );
   }
   if (input.firstName?.trim() && input.lastName?.trim()) {
     const nameMatch: Record<string, unknown> = {
@@ -115,10 +159,22 @@ export async function findPossibleDuplicates(
       ...(input.excludeId ? { NOT: { id: input.excludeId } } : {}),
       OR: or,
     },
+    include: {
+      encounters: { orderBy: { startedAt: "desc" }, take: 1, select: { visitNumber: true, startedAt: true, status: true } },
+    },
     orderBy: { createdAt: "desc" },
     take: 8,
   });
-  return rows.map(serializePatient);
+  return rows.map((row) => ({
+    ...serializePatient(row),
+    lastEncounter: row.encounters[0]
+      ? {
+          visitNumber: row.encounters[0].visitNumber,
+          startedAt: row.encounters[0].startedAt,
+          status: row.encounters[0].status,
+        }
+      : null,
+  }));
 }
 
 export async function listPatientRegistry(
@@ -127,23 +183,7 @@ export async function listPatientRegistry(
 ) {
   const page = Math.max(1, opts.page ?? 1);
   const take = Math.min(100, Math.max(10, opts.take ?? 30));
-  const q = opts.q?.trim();
-  const where = {
-    tenantId,
-    ...(opts.sex ? { sex: opts.sex as never } : {}),
-    ...(q
-      ? {
-          OR: [
-            { patientNumber: { contains: q, mode: "insensitive" as const } },
-            { phone: { contains: q } },
-            { alternativePhone: { contains: q } },
-            { firstName: { contains: q, mode: "insensitive" as const } },
-            { lastName: { contains: q, mode: "insensitive" as const } },
-            { middleName: { contains: q, mode: "insensitive" as const } },
-          ],
-        }
-      : {}),
-  };
+  const where = patientSearchWhere(tenantId, opts.q, opts.sex);
   const [total, rows] = await Promise.all([
     prisma.patient.count({ where }),
     prisma.patient.findMany({
@@ -162,6 +202,10 @@ export async function createPatient(
   input: z.infer<typeof createPatientSchema>,
   ip?: string,
 ) {
+  if (input.clientRequestId) {
+    const existing = await prisma.patient.findFirst({ where: { tenantId, clientRequestId: input.clientRequestId } });
+    if (existing) return serializePatient(existing);
+  }
   const duplicates = await findPossibleDuplicates(tenantId, input);
   if (duplicates.length && !input.confirmDuplicate) {
     throw conflict(
@@ -169,6 +213,7 @@ export async function createPatient(
       { duplicates },
     );
   }
+  try {
   const patient = await prisma.$transaction(async (tx) => {
     const patientNumber = await nextPatientNumber(tx, tenantId);
     const created = await tx.patient.create({
@@ -179,6 +224,8 @@ export async function createPatient(
         middleName: input.middleName?.trim() || null,
         lastName: input.lastName.trim(),
         phone: input.phone.trim(),
+        phoneNormalized: normalizePhoneKey(input.phone),
+        clientRequestId: input.clientRequestId ?? null,
         alternativePhone: input.alternativePhone?.trim() || null,
         dateOfBirth: input.dateOfBirth ? new Date(input.dateOfBirth) : null,
         ageYears: input.dateOfBirth ? null : input.ageYears ?? null,
@@ -205,6 +252,13 @@ export async function createPatient(
     return created;
   });
   return serializePatient(patient);
+  } catch (err) {
+    if (input.clientRequestId && isUniqueConstraintError(err)) {
+      const existing = await prisma.patient.findFirst({ where: { tenantId, clientRequestId: input.clientRequestId } });
+      if (existing) return serializePatient(existing);
+    }
+    throw err;
+  }
 }
 
 export async function updatePatient(
@@ -238,6 +292,7 @@ export async function updatePatient(
       middleName: input.middleName === undefined ? undefined : input.middleName?.trim() || null,
       lastName: input.lastName?.trim(),
       phone: input.phone?.trim(),
+      phoneNormalized: input.phone ? normalizePhoneKey(input.phone) : undefined,
       alternativePhone: input.alternativePhone === undefined ? undefined : input.alternativePhone?.trim() || null,
       dateOfBirth: input.dateOfBirth === undefined ? undefined : input.dateOfBirth ? new Date(input.dateOfBirth) : null,
       ageYears: input.dateOfBirth ? null : input.ageYears,
@@ -267,23 +322,18 @@ export async function getPatient(tenantId: string, patientId: string) {
 }
 
 export async function searchPatients(tenantId: string, query?: string, take = 30) {
-  const q = query?.trim();
   const patients = await prisma.patient.findMany({
-    where: q
-      ? {
-          tenantId,
-          OR: [
-            { patientNumber: { contains: q, mode: "insensitive" } },
-            { phone: { contains: q } },
-            { alternativePhone: { contains: q } },
-            { firstName: { contains: q, mode: "insensitive" } },
-            { lastName: { contains: q, mode: "insensitive" } },
-            { middleName: { contains: q, mode: "insensitive" } },
-          ],
-        }
-      : { tenantId },
+    where: patientSearchWhere(tenantId, query),
+    include: {
+      encounters: { orderBy: { startedAt: "desc" }, take: 1, select: { visitNumber: true, startedAt: true, status: true } },
+    },
     orderBy: { createdAt: "desc" },
     take,
   });
-  return patients.map(serializePatient);
+  return patients.map((row) => ({
+    ...serializePatient(row),
+    lastEncounter: row.encounters[0]
+      ? { visitNumber: row.encounters[0].visitNumber, startedAt: row.encounters[0].startedAt, status: row.encounters[0].status }
+      : null,
+  }));
 }

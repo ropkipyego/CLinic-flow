@@ -157,6 +157,44 @@ export async function upsertMedicine(
   return serializeMedicine(medicine);
 }
 
+export async function removeMedicine(tenantId: string, actorId: string, id: string) {
+  const existing = await prisma.medicine.findFirst({ where: { id, tenantId } });
+  if (!existing) throw notFound("Medicine not found.");
+  const [movements, charges, rx, dispense, po, grn, takes, maps] = await Promise.all([
+    prisma.stockMovement.count({ where: { medicineId: id } }),
+    prisma.charge.count({ where: { medicineId: id } }),
+    prisma.prescriptionItem.count({ where: { medicineId: id } }),
+    prisma.dispenseItem.count({ where: { medicineId: id } }),
+    prisma.purchaseOrderLine.count({ where: { medicineId: id } }),
+    prisma.goodsReceiptLine.count({ where: { medicineId: id } }),
+    prisma.stockTakeLine.count({ where: { medicineId: id } }),
+    prisma.catalogueImportMap.count({ where: { medicineId: id } }),
+  ]);
+  const history = movements + charges + rx + dispense + po + grn + takes + maps;
+  if (history > 0 || existing.quantityOnHand !== 0) {
+    const medicine = await prisma.medicine.update({ where: { id }, data: { active: false } });
+    await writeAudit({
+      tenantId,
+      userId: actorId,
+      action: "medicine.deactivated",
+      entity: "medicine",
+      entityId: id,
+      metadata: { sku: existing.sku, history, quantityOnHand: existing.quantityOnHand },
+    });
+    return { ...serializeMedicine(medicine), deleted: false, deactivated: true };
+  }
+  await prisma.medicine.delete({ where: { id } });
+  await writeAudit({
+    tenantId,
+    userId: actorId,
+    action: "medicine.deleted",
+    entity: "medicine",
+    entityId: id,
+    metadata: { sku: existing.sku, name: existing.name },
+  });
+  return { deleted: true, deactivated: false };
+}
+
 export async function updateMedicineSellingPrice(
   tenantId: string,
   actorId: string,

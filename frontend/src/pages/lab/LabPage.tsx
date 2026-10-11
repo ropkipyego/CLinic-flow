@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { get, patch, post } from "../../api/client";
+import { api, get, patch, post } from "../../api/client";
 import { Alert, Button, Empty, Field, PageHeader, StatusBadge, Table, inputClass } from "../../components/ui";
 import { Icons } from "../../components/icons";
 import { useAuth } from "../../auth/AuthContext";
@@ -197,7 +197,26 @@ export function LabPage() {
                     <td className="px-3 py-2">{t.category}</td>
                     <td className="px-3 py-2">{t.price}</td>
                     <td className="px-3 py-2">{t.turnaroundTime || "—"}</td>
-                    <td className="px-3 py-2"><Button variant="secondary" onClick={() => setEditingTest(t.id)}>Edit</Button></td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        <Button variant="secondary" onClick={() => setEditingTest(t.id)}>Edit</Button>
+                        <Button
+                          variant="ghost"
+                          onClick={async () => {
+                            if (!window.confirm(`Remove ${t.name}? Tests used on orders are deactivated, not deleted.`)) return;
+                            try {
+                              const result = await api<{ deactivated?: boolean }>(`/lab/tests/${t.id}`, { method: "DELETE" });
+                              setOk(result.deactivated ? `${t.name} deactivated (history kept).` : `${t.name} deleted.`);
+                              await load();
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : "Unable to remove that test.");
+                            }
+                          }}
+                        >
+                          {t.active ? "Deactivate" : "Delete"}
+                        </Button>
+                      </div>
+                    </td>
                   </>
                 )}
               </tr>

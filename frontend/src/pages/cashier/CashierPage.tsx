@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getOrCreatePaymentKey, clearPaymentKey } from "../../lib/paymentKey";
 import { useToast } from "../../components/ToastProvider";
-import { get, post } from "../../api/client";
+import { api, get, post } from "../../api/client";
 import { Alert, Button, Empty, Field, PageHeader, Stat, StatusBadge, Table, inputClass } from "../../components/ui";
 import { Icons } from "../../components/icons";
 import { useAuth } from "../../auth/AuthContext";
@@ -24,6 +24,7 @@ type BillRow = {
 export function CashierPage() {
   const { tenant } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const toast = useToast();
   const currency = tenant?.currency || "KES";
   const [dash, setDash] = useState<any>(null);
@@ -61,8 +62,13 @@ export function CashierPage() {
   }, []);
 
   useEffect(() => {
+    const fromUrl = params.get("encounter");
+    if (fromUrl) {
+      void openBill(fromUrl);
+      return;
+    }
     if (selectedId && !bill) void openBill(selectedId);
-  }, [selectedId]);
+  }, [selectedId, params]);
 
   async function openBill(encounterId: string) {
     const data = await get(`/payments/encounters/${encounterId}`);
@@ -200,7 +206,7 @@ export function CashierPage() {
           {bill.charges.length === 0 ? (
             <p className="mb-3 text-sm text-slate-500">No charges yet. Add a hospital item below, or wait for lab/pharmacy to post.</p>
           ) : (
-            <Table headers={["Item", "Qty", "Price", "Total", "Status"]}>
+            <Table headers={["Item", "Qty", "Price", "Total", "Status", ""]}>
               {bill.charges.map((c: any) => (
                 <tr key={c.id}>
                   <td className="px-3 py-2">{c.description}</td>
@@ -208,6 +214,28 @@ export function CashierPage() {
                   <td className="px-3 py-2">{c.unitPrice}</td>
                   <td className="px-3 py-2">{c.total}</td>
                   <td className="px-3 py-2"><StatusBadge status={c.status} /></td>
+                  <td className="px-3 py-2">
+                    {c.status === "UNPAID" ? (
+                      <Button
+                        variant="ghost"
+                        onClick={async () => {
+                          if (!window.confirm(`Void unpaid charge “${c.description}”? Paid receipts cannot be deleted.`)) return;
+                          try {
+                            await api(`/charges/${c.id}`, { method: "DELETE" });
+                            setOk("Unpaid charge voided.");
+                            await openBill(bill.encounterId);
+                            await load();
+                          } catch (err) {
+                            setError(err instanceof Error ? err.message : "Unable to void that charge.");
+                          }
+                        }}
+                      >
+                        Void
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-slate-400">Kept</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </Table>

@@ -45,18 +45,18 @@ type SortKey = "time" | "patient" | "status" | "type" | "balance";
 
 const shortcuts: Record<string, { to: string; label: string }[]> = {
   SUPER_ADMIN: [
-    { to: "/patients/new", label: "Add patient" },
+    { to: "/patients", label: "Patients" },
     { to: "/admin/roles", label: "Rights & roles" },
     { to: "/admin", label: "Clinic settings" },
   ],
   ADMIN: [
-    { to: "/patients/new", label: "Add patient" },
+    { to: "/patients", label: "Patients" },
     { to: "/visits", label: "Today's visits" },
     { to: "/admin", label: "Clinic settings" },
   ],
   RECEPTION: [
-    { to: "/patients/new", label: "Register patient" },
-    { to: "/patients", label: "Patient registry" },
+    { to: "/patients", label: "Find patient" },
+    { to: "/visits", label: "Today's visits" },
     { to: "/cashier", label: "Collect payment" },
   ],
   DOCTOR: [{ to: "/consultation", label: "Open consultation" }],

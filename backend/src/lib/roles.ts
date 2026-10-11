@@ -40,4 +40,8 @@ export const ROLE_RIGHTS = [
   { area: "Create clinic Admin", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: false },
   { area: "Create or demote Super Admin", SUPER_ADMIN: true, ADMIN: false, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: false },
   { area: "Clinic settings, reports, SMS, audit", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: false },
+  { area: "Deactivate or delete staff (history blocks delete)", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: false },
+  { area: "Deactivate or delete unused catalogue items", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
+  { area: "Void unpaid charges; paid receipts stay", SUPER_ADMIN: true, ADMIN: true, RECEPTION: true, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: true },
+  { area: "Cancel a visit with no payments", SUPER_ADMIN: true, ADMIN: true, RECEPTION: true, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: false },
 ] as const;

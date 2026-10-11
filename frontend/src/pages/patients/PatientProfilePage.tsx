@@ -22,7 +22,7 @@ export function PatientProfilePage() {
     if (!id) return;
     try {
       const visit = await post<{ id: string }>("/encounters", { patientId: id, checkInToConsultation: true });
-      window.location.href = `/visits?opened=${visit.id}`;
+      window.location.href = user?.role === "DOCTOR" ? `/consultation/${visit.id}` : `/visits?opened=${visit.id}`;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to start visit.");
     }
@@ -54,7 +54,16 @@ export function PatientProfilePage() {
             {data.encounters.map((e: any) => (
               <tr key={e.id}>
                 <td className="px-3 py-2">
-                  <Link className="text-[var(--brand)]" to={`/consultation/${e.id}`}>
+                  <Link
+                    className="text-[var(--brand)]"
+                    to={
+                      user?.role === "DOCTOR" || isClinicAdmin(user?.role)
+                        ? `/consultation/${e.id}`
+                        : user?.role === "CASHIER" || user?.role === "RECEPTION"
+                          ? `/cashier?encounter=${e.id}`
+                          : `/visits`
+                    }
+                  >
                     {e.visitNumber}
                   </Link>
                 </td>

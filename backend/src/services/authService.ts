@@ -52,6 +52,7 @@ export async function login(input: z.infer<typeof loginSchema>, ip?: string) {
     tenantId: user.tenantId,
     role: user.role,
     email: user.email,
+    tv: user.tokenVersion,
   });
 
   return {
@@ -107,7 +108,7 @@ export async function resetPassword(input: z.infer<typeof resetPasswordSchema>) 
   await prisma.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: record.userId },
-      data: { passwordHash: await hashPassword(input.password) },
+      data: { passwordHash: await hashPassword(input.password), tokenVersion: { increment: 1 } },
     });
     await tx.passwordResetToken.update({
       where: { id: record.id },

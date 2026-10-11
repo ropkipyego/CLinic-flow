@@ -19,6 +19,7 @@ import {
   labResultDocument,
   updateLabOrderStatus,
   upsertLabTest,
+  removeLabTest,
   walkInLabSchema,
   createWalkInLabOrder,
   labPricePatchSchema,
@@ -58,6 +59,14 @@ labRouter.patch(
     const body = labTestSchema.parse(req.body);
     return ok(res, await upsertLabTest(req.user!.tenantId, req.user!.id, body, param(req, "id")));
   }),
+);
+
+labRouter.delete(
+  "/tests/:id",
+  authorize("ADMIN"),
+  asyncHandler(async (req, res) =>
+    ok(res, await removeLabTest(req.user!.tenantId, req.user!.id, param(req, "id"))),
+  ),
 );
 
 

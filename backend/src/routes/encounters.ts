@@ -30,11 +30,13 @@ encountersRouter.get(
 
 encountersRouter.get(
   "/stats/today",
+  authorize("ADMIN", "RECEPTION", "DOCTOR", "CASHIER"),
   asyncHandler(async (req, res) => ok(res, await todayStats(req.user!.tenantId))),
 );
 
 encountersRouter.get(
   "/stats/dashboard",
+  authorize("ADMIN"),
   asyncHandler(async (req, res) => ok(res, await operationalDashboard(req.user!.tenantId))),
 );
 

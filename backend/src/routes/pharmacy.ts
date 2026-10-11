@@ -23,6 +23,7 @@ import {
   recordStockMovement,
   stockMovementSchema,
   upsertMedicine,
+  removeMedicine,
   listStockMovements,
   otcSaleSchema,
   sellOtc,
@@ -104,6 +105,14 @@ pharmacyRouter.patch(
     const body = medicineSchema.parse(req.body);
     return ok(res, await upsertMedicine(req.user!.tenantId, req.user!.id, body, param(req, "id")));
   }),
+);
+
+pharmacyRouter.delete(
+  "/medicines/:id",
+  authorize("ADMIN", "PHARMACY"),
+  asyncHandler(async (req, res) =>
+    ok(res, await removeMedicine(req.user!.tenantId, req.user!.id, param(req, "id"))),
+  ),
 );
 
 pharmacyRouter.get(

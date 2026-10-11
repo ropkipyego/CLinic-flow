@@ -115,6 +115,49 @@ export async function upsertLabTest(
   return saved ? { ...saved, price: money(saved.price) } : saved;
 }
 
+export async function removeLabTest(tenantId: string, actorId: string, id: string) {
+  const existing = await prisma.labTest.findFirst({ where: { id, tenantId } });
+  if (!existing) throw notFound("Lab test not found.");
+  const [orders, results] = await Promise.all([
+    prisma.labOrderItem.count({ where: { labTestId: id } }),
+    prisma.labResult.count({ where: { labTestId: id } }),
+  ]);
+  if (orders + results > 0) {
+    const test = await prisma.labTest.update({ where: { id }, data: { active: false } });
+    if (existing.serviceId) {
+      await prisma.service.updateMany({ where: { id: existing.serviceId, tenantId }, data: { active: false } });
+    }
+    await writeAudit({
+      tenantId,
+      userId: actorId,
+      action: "lab_test.deactivated",
+      entity: "lab_test",
+      entityId: id,
+      metadata: { code: existing.code, orders, results },
+    });
+    return { ...test, price: money(test.price), deleted: false, deactivated: true };
+  }
+  if (existing.serviceId) {
+    const billed = await prisma.charge.count({ where: { serviceId: existing.serviceId } });
+    if (billed === 0) {
+      await prisma.labTest.update({ where: { id }, data: { serviceId: null } });
+      await prisma.service.deleteMany({ where: { id: existing.serviceId, tenantId } });
+    } else {
+      await prisma.service.updateMany({ where: { id: existing.serviceId, tenantId }, data: { active: false } });
+    }
+  }
+  await prisma.labTest.delete({ where: { id } });
+  await writeAudit({
+    tenantId,
+    userId: actorId,
+    action: "lab_test.deleted",
+    entity: "lab_test",
+    entityId: id,
+    metadata: { code: existing.code, name: existing.name },
+  });
+  return { deleted: true, deactivated: false };
+}
+
 export async function updateLabTestPrice(
   tenantId: string,
   actorId: string,

@@ -7,6 +7,7 @@ export type JwtPayload = {
   tenantId: string;
   role: Role;
   email: string;
+  tv?: number;
 };
 
 export function signToken(payload: JwtPayload): string {

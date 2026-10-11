@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { get, patch, post } from "../../api/client";
+import { api, get, patch, post } from "../../api/client";
 import { Alert, Button, Field, PageHeader, Table, inputClass } from "../../components/ui";
 import { Icons } from "../../components/icons";
 import { ROLE_LABEL } from "../../lib/labels";
@@ -33,6 +33,10 @@ export function AdminPage() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [createdSecret, setCreatedSecret] = useState("");
+  const [userQuery, setUserQuery] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState("");
+  const [userActiveFilter, setUserActiveFilter] = useState("");
+  const [userAudit, setUserAudit] = useState<{ email: string; rows: any[] } | null>(null);
   const [userForm, setUserForm] = useState({
     email: "",
     password: "",
@@ -44,7 +48,11 @@ export function AdminPage() {
   async function load() {
     try {
       setTenant(await get("/tenants/current"));
-      setUsers(await get("/users"));
+      const qs = new URLSearchParams();
+      if (userQuery.trim()) qs.set("q", userQuery.trim());
+      if (userRoleFilter) qs.set("role", userRoleFilter);
+      if (userActiveFilter) qs.set("active", userActiveFilter);
+      setUsers(await get(`/users${qs.toString() ? `?${qs}` : ""}`));
       setServices(await get("/services"));
       setAudit(await get("/audit"));
     } catch (e) {
@@ -82,12 +90,44 @@ export function AdminPage() {
     }
   }
 
-  async function toggleActive(user: any) {
+  async function toggleActive(account: any) {
+    if (account.active && !window.confirm(`Deactivate ${account.email}? They will be signed out and cannot log in.`)) return;
     try {
-      await patch(`/users/${user.id}`, { active: !user.active });
+      await patch(`/users/${account.id}`, { active: !account.active });
+      setOk(account.active ? `${account.email} deactivated.` : `${account.email} reactivated.`);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to update that account.");
+    }
+  }
+
+  async function resetPassword(account: any) {
+    if (!window.confirm(`Send a password reset for ${account.email}?`)) return;
+    try {
+      await post(`/users/${account.id}/password-reset`, {});
+      setOk(`Password reset queued for ${account.email}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to start a password reset.");
+    }
+  }
+
+  async function showAudit(account: any) {
+    try {
+      const rows = await get<any[]>(`/users/${account.id}/audit`);
+      setUserAudit({ email: account.email, rows });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load account history.");
+    }
+  }
+
+  async function removeUser(account: any) {
+    if (!window.confirm(`Delete ${account.email}? Accounts with clinical or payment history must be deactivated instead.`)) return;
+    try {
+      await api(`/users/${account.id}`, { method: "DELETE" });
+      setOk(`${account.email} deleted.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete that account.");
     }
   }
 
@@ -199,6 +239,21 @@ export function AdminPage() {
               <Alert kind="info">Temporary password (copy now): <strong>{createdSecret}</strong></Alert>
             ) : null}
           </form>
+          <form onSubmit={(e) => { e.preventDefault(); void load(); }} className="flex flex-wrap gap-2">
+            <input className={`${inputClass} max-w-xs`} value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder="Search name or email" />
+            <select className={`${inputClass} max-w-[12rem]`} value={userRoleFilter} onChange={(e) => setUserRoleFilter(e.target.value)}>
+              <option value="">All roles</option>
+              {["SUPER_ADMIN", "ADMIN", ...STAFF_ROLES.filter((r) => r !== "ADMIN")].map((r) => (
+                <option key={r} value={r}>{ROLE_LABEL[r as Role]}</option>
+              ))}
+            </select>
+            <select className={`${inputClass} max-w-[10rem]`} value={userActiveFilter} onChange={(e) => setUserActiveFilter(e.target.value)}>
+              <option value="">All statuses</option>
+              <option value="true">Active</option>
+              <option value="false">Inactive</option>
+            </select>
+            <Button type="submit" variant="secondary">Filter</Button>
+          </form>
           <Table headers={["Name", "Email", "Role", "Active", ""]}>
             {users.map((u) => (
               <tr key={u.id} className="hover:bg-slate-50">
@@ -210,12 +265,33 @@ export function AdminPage() {
                   {u.role === "SUPER_ADMIN" && !isSuperAdmin(user?.role) ? (
                     <span className="text-xs text-slate-400">Super Admin</span>
                   ) : (
-                    <Button variant="ghost" onClick={() => void toggleActive(u)}>{u.active ? "Deactivate" : "Activate"}</Button>
+                    <div className="flex flex-wrap gap-1">
+                      <Button variant="ghost" onClick={() => void toggleActive(u)}>{u.active ? "Deactivate" : "Activate"}</Button>
+                      <Button variant="ghost" onClick={() => void resetPassword(u)}>Reset password</Button>
+                      <Button variant="ghost" onClick={() => void showAudit(u)}>History</Button>
+                      <Button variant="ghost" onClick={() => void removeUser(u)}>Delete</Button>
+                    </div>
                   )}
                 </td>
               </tr>
             ))}
           </Table>
+          {userAudit ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <h3 className="mb-2 text-sm font-semibold">History for {userAudit.email}</h3>
+              {userAudit.rows.length === 0 ? <p className="text-sm text-slate-500">No audit events for this account.</p> : (
+                <Table headers={["Time", "Action", "Entity"]}>
+                  {userAudit.rows.map((a) => (
+                    <tr key={a.id}>
+                      <td className="px-3 py-2">{new Date(a.createdAt).toLocaleString()}</td>
+                      <td className="px-3 py-2">{a.action}</td>
+                      <td className="px-3 py-2">{a.entity}</td>
+                    </tr>
+                  ))}
+                </Table>
+              )}
+            </div>
+          ) : null}
         </>
       ) : null}
 
@@ -268,7 +344,26 @@ export function AdminPage() {
                     <td className="px-3 py-2">{s.category}</td>
                     <td className="px-3 py-2">{s.price}</td>
                     <td className="px-3 py-2">{s.active ? "Active" : "Inactive"}</td>
-                    <td className="px-3 py-2"><Button variant="secondary" onClick={() => setEditingService(s.id)}>Edit</Button></td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        <Button variant="secondary" onClick={() => setEditingService(s.id)}>Edit</Button>
+                        <Button
+                          variant="ghost"
+                          onClick={async () => {
+                            if (!window.confirm(`Remove ${s.name}? Services used on bills are deactivated, not deleted.`)) return;
+                            try {
+                              const result = await api<{ deactivated?: boolean }>(`/services/${s.id}`, { method: "DELETE" });
+                              setOk(result.deactivated ? `${s.name} deactivated (charges kept).` : `${s.name} deleted.`);
+                              await load();
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : "Unable to remove that service.");
+                            }
+                          }}
+                        >
+                          {s.active ? "Deactivate" : "Delete"}
+                        </Button>
+                      </div>
+                    </td>
                   </>
                 )}
               </tr>

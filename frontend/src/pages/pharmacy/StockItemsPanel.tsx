@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { patch, post } from "../../api/client";
+import { api, patch, post } from "../../api/client";
 import { Button, Field, Table, inputClass } from "../../components/ui";
 
 export function StockItemsPanel({
@@ -65,6 +65,22 @@ export function StockItemsPanel({
     }
   }
 
+  async function remove(item: any) {
+    const action = item.quantityOnHand || !item.active ? "deactivate" : "delete";
+    if (!window.confirm(
+      action === "delete"
+        ? `Delete ${item.name}? Items with stock or history are deactivated instead.`
+        : `Deactivate ${item.name}? It will stay in history but cannot be sold.`,
+    )) return;
+    try {
+      const result = await api<{ deleted?: boolean; deactivated?: boolean }>(`/pharmacy/medicines/${item.id}`, { method: "DELETE" });
+      onOk(result.deactivated ? `${item.name} deactivated (history kept).` : `${item.name} deleted.`);
+      await onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Unable to remove that item.");
+    }
+  }
+
   const rows = meds.filter((m) => {
     const n = q.trim().toLowerCase();
     if (!n) return true;
@@ -89,7 +105,7 @@ export function StockItemsPanel({
         <Button type="submit">Add item</Button>
       </form>
       <input className={`${inputClass} max-w-sm`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter items…" />
-      <Table headers={["Item", "SKU", "On hand", "Sell", "Cost", ""]}>
+      <Table headers={["Item", "SKU", "On hand", "Sell", "Cost", "Active", ""]}>
         {rows.map((m) => (
           <tr key={m.id}>
             {editing === m.id ? (
@@ -99,6 +115,7 @@ export function StockItemsPanel({
                 <td className="px-3 py-2">{m.quantityOnHand}</td>
                 <td className="px-3 py-2"><input className={inputClass} defaultValue={m.sellingPrice} onChange={(e) => { m.sellingPrice = e.target.value; }} /></td>
                 <td className="px-3 py-2"><input className={inputClass} defaultValue={m.costPrice} onChange={(e) => { m.costPrice = e.target.value; }} /></td>
+                <td className="px-3 py-2">{m.active ? "Yes" : "No"}</td>
                 <td className="px-3 py-2"><Button onClick={() => void save(undefined, m)}>Save</Button></td>
               </>
             ) : (
@@ -108,7 +125,13 @@ export function StockItemsPanel({
                 <td className="px-3 py-2">{m.quantityOnHand}</td>
                 <td className="px-3 py-2">{m.sellingPrice}</td>
                 <td className="px-3 py-2">{m.costPrice}</td>
-                <td className="px-3 py-2"><Button variant="secondary" onClick={() => setEditing(m.id)}>Edit</Button></td>
+                <td className="px-3 py-2">{m.active ? "Yes" : "No"}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    <Button variant="secondary" onClick={() => setEditing(m.id)}>Edit</Button>
+                    <Button variant="ghost" onClick={() => void remove(m)}>{m.active ? "Deactivate" : "Delete"}</Button>
+                  </div>
+                </td>
               </>
             )}
           </tr>

@@ -103,7 +103,9 @@ export function withClientRequestId(path: string, body: unknown) {
     path.includes("/payments/encounters/") ||
     path.endsWith("/otc") ||
     path.endsWith("/walk-in") ||
-    path.includes("/charges/encounters/");
+    path.includes("/charges/encounters/") ||
+    path === "/patients" ||
+    path === "/encounters";
   if (!needsKey) return body;
   return { ...record, clientRequestId: crypto.randomUUID() };
 }

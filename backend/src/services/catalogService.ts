@@ -72,6 +72,34 @@ export async function upsertService(
   return serializeService(service);
 }
 
+export async function removeService(tenantId: string, actorId: string, id: string) {
+  const existing = await prisma.service.findFirst({ where: { id, tenantId } });
+  if (!existing) throw notFound("Service not found.");
+  const charges = await prisma.charge.count({ where: { serviceId: id } });
+  if (charges > 0) {
+    const service = await prisma.service.update({ where: { id }, data: { active: false } });
+    await writeAudit({
+      tenantId,
+      userId: actorId,
+      action: "service.deactivated",
+      entity: "service",
+      entityId: id,
+      metadata: { code: existing.code, charges },
+    });
+    return { ...serializeService(service), deleted: false, deactivated: true };
+  }
+  await prisma.service.delete({ where: { id } });
+  await writeAudit({
+    tenantId,
+    userId: actorId,
+    action: "service.deleted",
+    entity: "service",
+    entityId: id,
+    metadata: { code: existing.code, name: existing.name },
+  });
+  return { deleted: true, deactivated: false };
+}
+
 export async function getService(tenantId: string, id: string) {
   const service = await prisma.service.findFirst({ where: { id, tenantId } });
   if (!service) throw notFound("Service not found.");
