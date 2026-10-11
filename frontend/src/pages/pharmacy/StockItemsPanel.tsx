@@ -75,6 +75,7 @@ export function StockItemsPanel({
     <div className="space-y-4">
       <form onSubmit={(e) => void save(e)} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold">Add a stock item</h2>
+        <p className="text-sm text-slate-500">New items start at zero on hand. Zero is valid — you do not need to receive stock before saving.</p>
         <div className="grid gap-2 md:grid-cols-4">
           <Field label="Name"><input className={inputClass} value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} required /></Field>
           <Field label="Generic"><input className={inputClass} value={form.genericName} onChange={(e) => setForm((s) => ({ ...s, genericName: e.target.value }))} /></Field>

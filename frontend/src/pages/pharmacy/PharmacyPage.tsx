@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { get, post } from "../../api/client";
 import { Alert, Button, Empty, Field, PageHeader, StatusBadge, Table, inputClass } from "../../components/ui";
 import { Icons } from "../../components/icons";
@@ -6,37 +7,22 @@ import { useUiState } from "../../lib/uiState";
 import { emptyWalkInClient, WalkInClientFields, walkInPayload } from "../../components/WalkInClientFields";
 import { MedicineSelect } from "../../components/MedicinePicker";
 import { ApiRequestError } from "../../api/client";
-import { StockItemsPanel } from "./StockItemsPanel";
-import { StockImportPanel } from "./StockImportPanel";
-import { PurchaseOrderPanel } from "./PurchaseOrderPanel";
-import { StockTakePanel } from "./StockTakePanel";
 
 export function PharmacyPage() {
-  const [tab, setTab] = useUiState<"queue" | "otc" | "stock" | "items" | "import" | "lpo" | "take">("pharmacy.tab", "queue");
+  const [tab, setTab] = useUiState<"queue" | "otc">("pharmacy.tab", "queue");
   const [queue, setQueue] = useState<any[]>([]);
   const [meds, setMeds] = useState<any[]>([]);
-  const [movements, setMovements] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [selected, setSelected] = useState<any>(null);
   const [client, setClient] = useState(emptyWalkInClient());
   const [otcItems, setOtcItems] = useState<{ medicineId: string; quantity: string }[]>([{ medicineId: "", quantity: "1" }]);
   const [lastOtc, setLastOtc] = useState<any>(null);
-  const [stockQuery, setStockQuery] = useState("");
-  const [formFilter, setFormFilter] = useState("ALL");
-  const [move, setMove] = useState({
-    medicineId: "",
-    action: "IN",
-    type: "PURCHASE",
-    quantity: "10",
-    notes: "",
-  });
 
   async function load() {
     try {
       setQueue(await get("/pharmacy/queue"));
-      setMeds(await get("/pharmacy/medicines"));
-      setMovements(await get("/inventory/movements"));
+      setMeds(await get("/pharmacy/medicines?active=true"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to load pharmacy data.");
     }
@@ -84,65 +70,20 @@ export function PharmacyPage() {
     }
   }
 
-  async function adjust(e: FormEvent) {
-    e.preventDefault();
-    const qty = Number(move.quantity);
-    if (!move.medicineId) {
-      setError("Choose a medicine from the clinic list.");
-      return;
-    }
-    if (!Number.isInteger(qty) || qty < 1) {
-      setError("Quantity must be a whole number of at least 1.");
-      return;
-    }
-    try {
-      const direction = move.action === "OUT" ? "OUT" : "IN";
-      const type = move.action === "OUT" ? "ADJUSTMENT" : move.type;
-      await post("/inventory/movements", {
-        medicineId: move.medicineId,
-        type,
-        direction,
-        quantity: qty,
-        notes: move.notes || (direction === "OUT" ? "Stock adjustment out" : "Stock received"),
-      });
-      const name = meds.find((m) => m.id === move.medicineId)?.name || "Item";
-      setOk(direction === "OUT" ? `${name}: stock reduced by ${qty}.` : `${name}: stock increased by ${qty}.`);
-      setMove((s) => ({ ...s, quantity: "10", notes: "" }));
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to record stock movement.");
-    }
-  }
-
-
-  const forms = useMemo(() => ["ALL", ...Array.from(new Set(meds.map((m) => m.dosageForm).filter(Boolean))).sort()], [meds]);
-  const visibleMeds = useMemo(() => {
-    const needle = stockQuery.trim().toLowerCase();
-    return meds.filter((m) => {
-      if (formFilter !== "ALL" && m.dosageForm !== formFilter) return false;
-      if (!needle) return true;
-      return [m.name, m.genericName, m.sku, m.strength].filter(Boolean).some((p: string) => p.toLowerCase().includes(needle));
-    });
-  }, [meds, stockQuery, formFilter]);
-
-  const selectedMed = meds.find((m) => m.id === move.medicineId);
-
   return (
     <div className="space-y-4">
       <PageHeader
         title="Pharmacy"
-        subtitle="Items, import, LPO → GRN receive, stock take, dispense, or OTC."
+        subtitle="Dispense prescriptions and record OTC sales. Catalogue and shelf quantities are under Stock."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button variant={tab === "queue" ? "primary" : "secondary"} onClick={() => setTab("queue")}>Queue</Button>
-            <Button variant={tab === "stock" ? "primary" : "secondary"} onClick={() => setTab("stock")}>Store</Button>
-            <Button variant={tab === "items" ? "primary" : "secondary"} onClick={() => setTab("items")}>Catalogue</Button>
-            <Button variant={tab === "lpo" ? "primary" : "secondary"} onClick={() => setTab("lpo")}>Procurement</Button>
-            <Button variant={tab === "take" ? "primary" : "secondary"} onClick={() => setTab("take")}>Stock take</Button>
-            <Button variant={tab === "import" ? "primary" : "secondary"} onClick={() => setTab("import")}>CSV import</Button>
+            <Button variant={tab === "queue" ? "primary" : "secondary"} onClick={() => setTab("queue")}>Dispensing queue</Button>
             <Button variant={tab === "otc" ? "primary" : "secondary"} onClick={() => setTab("otc")}>
               <Icons.pill /> OTC sale
             </Button>
+            <Link to="/inventory" className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
+              Open stock
+            </Link>
           </div>
         }
       />
@@ -195,113 +136,6 @@ export function PharmacyPage() {
             ))}
           </Table>
         )
-      ) : null}
-
-      {tab === "items" ? (
-        <StockItemsPanel meds={meds} onSaved={load} onError={setError} onOk={setOk} />
-      ) : null}
-      {tab === "import" ? (
-        <StockImportPanel onSaved={load} onError={setError} onOk={setOk} />
-      ) : null}
-      {tab === "lpo" ? (
-        <PurchaseOrderPanel meds={meds} onError={setError} onOk={setOk} onStockChanged={load} />
-      ) : null}
-      {tab === "take" ? (
-        <StockTakePanel onError={setError} onOk={setOk} onStockChanged={load} />
-      ) : null}
-
-      {tab === "stock" ? (
-        <>
-          <form onSubmit={adjust} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-slate-800">Receive or adjust stock</h2>
-            </div>
-            <p className="text-sm text-slate-500">
-              The list is the clinic stock sheet. New items start at 0. Receive purchases here before dispensing or OTC.
-              {selectedMed ? ` Selected: ${selectedMed.name} · ${selectedMed.quantityOnHand} on hand.` : ""}
-            </p>
-            <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-5">
-              <Field label="Medicine">
-                <MedicineSelect medicines={meds} value={move.medicineId} onChange={(id) => setMove((s) => ({ ...s, medicineId: id }))} required />
-              </Field>
-              <Field label="Action">
-                <select className={inputClass} value={move.action} onChange={(e) => setMove((s) => ({ ...s, action: e.target.value, type: e.target.value === "OUT" ? "ADJUSTMENT" : "PURCHASE" }))}>
-                  <option value="IN">Receive / add</option>
-                  <option value="OUT">Reduce / adjust down</option>
-                </select>
-              </Field>
-              {move.action === "IN" ? (
-                <Field label="Reason">
-                  <select className={inputClass} value={move.type} onChange={(e) => setMove((s) => ({ ...s, type: e.target.value }))}>
-                    <option value="PURCHASE">Purchase received</option>
-                    <option value="OPENING_BALANCE">Opening balance</option>
-                    <option value="RETURN">Return to stock</option>
-                    <option value="ADJUSTMENT">Adjustment in</option>
-                  </select>
-                </Field>
-              ) : (
-                <Field label="Reason">
-                  <select className={inputClass} value="ADJUSTMENT" disabled>
-                    <option>Adjustment out</option>
-                  </select>
-                </Field>
-              )}
-              <Field label="Quantity">
-                <input className={inputClass} value={move.quantity} onChange={(e) => setMove((s) => ({ ...s, quantity: e.target.value }))} required inputMode="numeric" />
-              </Field>
-              <Field label={move.action === "OUT" ? "Why (required)" : "Notes"}>
-                <input className={inputClass} value={move.notes} onChange={(e) => setMove((s) => ({ ...s, notes: e.target.value }))} placeholder={move.action === "OUT" ? "Damaged, expired, count correction…" : "Supplier or batch"} />
-              </Field>
-            </div>
-            <Button type="submit"><Icons.check /> Save stock movement</Button>
-          </form>
-
-          <div className="flex flex-wrap gap-2">
-            <input className={`${inputClass} max-w-sm`} value={stockQuery} onChange={(e) => setStockQuery(e.target.value)} placeholder="Filter the clinic list…" />
-            <select className={`${inputClass} max-w-[12rem]`} value={formFilter} onChange={(e) => setFormFilter(e.target.value)}>
-              {forms.map((f) => <option key={f} value={f}>{f === "ALL" ? "All forms" : f}</option>)}
-            </select>
-            <span className="self-center text-xs text-slate-500">{visibleMeds.length} items · click a row to adjust</span>
-          </div>
-          {visibleMeds.length === 0 ? (
-            <Empty title="No medicines on this list yet." body="Use Apply clinic drug list, then receive opening stock." />
-          ) : (
-            <Table headers={["Medicine", "Form", "SKU", "On hand", "Reorder", "Price"]}>
-              {visibleMeds.map((m) => (
-                <tr
-                  key={m.id}
-                  className={`cursor-pointer ${m.id === move.medicineId ? "bg-sky-50" : m.lowStock || m.quantityOnHand === 0 ? "bg-amber-50" : "hover:bg-slate-50"}`}
-                  onClick={() => setMove((s) => ({ ...s, medicineId: m.id }))}
-                >
-                  <td className="px-3 py-2">
-                    <div className="font-medium">{m.name} {m.strength}</div>
-                    <div className="text-xs text-slate-500">{m.genericName}</div>
-                  </td>
-                  <td className="px-3 py-2">{m.dosageForm}</td>
-                  <td className="px-3 py-2">{m.sku}</td>
-                  <td className="px-3 py-2 font-medium">{m.quantityOnHand}</td>
-                  <td className="px-3 py-2">{m.reorderLevel}</td>
-                  <td className="px-3 py-2">{m.sellingPrice}</td>
-                </tr>
-              ))}
-            </Table>
-          )}
-          <h3 className="pt-2 text-sm font-semibold text-slate-800">Recent movements</h3>
-          {movements.length === 0 ? <Empty title="No stock movements yet." body="Receive opening balances so dispensing and OTC can run." /> : (
-            <Table headers={["When", "Medicine", "Type", "Qty", "From → to", "By"]}>
-              {movements.slice(0, 20).map((m) => (
-                <tr key={m.id}>
-                  <td className="px-3 py-2">{new Date(m.createdAt).toLocaleString()}</td>
-                  <td className="px-3 py-2">{m.medicine?.name}</td>
-                  <td className="px-3 py-2">{m.type}</td>
-                  <td className="px-3 py-2">{m.quantity}</td>
-                  <td className="px-3 py-2">{m.previousQuantity} → {m.newQuantity}</td>
-                  <td className="px-3 py-2">{m.user?.firstName} {m.user?.lastName}</td>
-                </tr>
-              ))}
-            </Table>
-          )}
-        </>
       ) : null}
 
       {selected ? (

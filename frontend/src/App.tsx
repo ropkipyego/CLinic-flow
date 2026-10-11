@@ -11,6 +11,7 @@ import { VisitsPage } from "./pages/visits/VisitsPage";
 import { ConsultationPage } from "./pages/consultation/ConsultationPage";
 import { LabPage } from "./pages/lab/LabPage";
 import { PharmacyPage } from "./pages/pharmacy/PharmacyPage";
+import { InventoryPage } from "./pages/inventory/InventoryPage";
 import { CashierPage } from "./pages/cashier/CashierPage";
 import { ReceiptPage } from "./pages/cashier/ReceiptPage";
 import { ReportsPage } from "./pages/reports/ReportsPage";
@@ -55,6 +56,7 @@ export function App() {
         <Route path="/laboratory" element={<Guard roles={["LAB", "DOCTOR", "RECEPTION"]}><LabPage /></Guard>} />
         <Route path="/laboratory/results/:id" element={<Guard roles={["LAB", "DOCTOR"]}><LabResultDocumentPage /></Guard>} />
         <Route path="/pharmacy" element={<Guard roles={["PHARMACY"]}><PharmacyPage /></Guard>} />
+        <Route path="/inventory" element={<Guard roles={["PHARMACY"]}><InventoryPage /></Guard>} />
         <Route path="/cashier" element={<Guard roles={["CASHIER", "RECEPTION"]}><CashierPage /></Guard>} />
         <Route path="/cashier/receipts/:id" element={<Guard roles={["CASHIER", "RECEPTION"]}><ReceiptPage /></Guard>} />
         <Route path="/reports" element={<Guard roles={[]}><ReportsPage /></Guard>} />

@@ -24,9 +24,10 @@ const CARE: NavItem[] = [
 ];
 
 const OPERATIONS: NavItem[] = [
-  { to: "/laboratory", label: "Lab queue", roles: ["SUPER_ADMIN", "ADMIN", "LAB", "DOCTOR", "RECEPTION"], icon: "lab" },
-  { to: "/pharmacy", label: "Dispensing", roles: ["SUPER_ADMIN", "ADMIN", "PHARMACY"], icon: "pharmacy" },
-  { to: "/cashier", label: "Payments", roles: ["SUPER_ADMIN", "ADMIN", "CASHIER", "RECEPTION"], icon: "cashier" },
+  { to: "/laboratory", label: "Laboratory", roles: ["SUPER_ADMIN", "ADMIN", "LAB", "DOCTOR", "RECEPTION"], icon: "lab" },
+  { to: "/pharmacy", label: "Pharmacy", roles: ["SUPER_ADMIN", "ADMIN", "PHARMACY"], icon: "pharmacy" },
+  { to: "/inventory", label: "Stock", roles: ["SUPER_ADMIN", "ADMIN", "PHARMACY"], icon: "reports" },
+  { to: "/cashier", label: "Cashier", roles: ["SUPER_ADMIN", "ADMIN", "CASHIER", "RECEPTION"], icon: "cashier" },
 ];
 
 const ADMIN: NavItem[] = [
@@ -47,6 +48,7 @@ function pageTitle(pathname: string) {
   if (pathname.startsWith("/patients/")) return "Patient";
   if (pathname.startsWith("/admin/roles")) return "Rights & roles";
   if (pathname.startsWith("/admin/prices")) return "Price list";
+  if (pathname.startsWith("/inventory")) return "Stock & inventory";
   if (pathname.startsWith("/consultation")) return "Consultation";
   if (pathname.startsWith("/cashier/receipts")) return "Receipt";
   const map: Record<string, string> = {
@@ -55,6 +57,7 @@ function pageTitle(pathname: string) {
     "/visits": "Visits",
     "/laboratory": "Laboratory",
     "/pharmacy": "Pharmacy",
+    "/inventory": "Stock & inventory",
     "/cashier": "Cashier",
     "/reports": "Reports",
     "/sms": "SMS",

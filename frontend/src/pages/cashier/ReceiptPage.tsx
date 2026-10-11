@@ -61,7 +61,10 @@ export function ReceiptPage() {
           {r.items.map((i: any) => (
             <tr key={i.id}>
               <td className="py-1">{i.description}{i.quantity > 1 ? ` × ${i.quantity}` : ""}</td>
-              <td className="py-1 text-right">{i.total}</td>
+              <td className="py-1 text-right">
+                {i.total}
+                {typeof i.balance === "number" && i.balance > 0 ? ` · due ${i.balance}` : ""}
+              </td>
             </tr>
           ))}
         </tbody>

@@ -73,6 +73,7 @@ export function StockTakePanel({
 
   async function postTake() {
     if (!current) return;
+    if (!window.confirm("Post this stock take? Counted lines (including zero) will adjust the shelf. Blank counts are skipped.")) return;
     try {
       const take = await post<any>(`/procurement/stock-takes/${current.id}/post`, {});
       applyTake(take);

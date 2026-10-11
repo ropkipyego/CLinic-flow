@@ -331,7 +331,9 @@ export function ConsultationPage() {
 
             {tab === "documents" ? (
               <Panel>
-                <p className="text-sm text-slate-600">Verified laboratory reports for this visit can be printed from Results.</p>
+                <p className="text-sm text-slate-600">
+                  Verified laboratory reports for this visit can be printed from Results. General patient file uploads are not in this version — they need an approved document table before they can be stored safely.
+                </p>
               </Panel>
             ) : null}
           </>

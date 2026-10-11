@@ -28,6 +28,7 @@ export const ROLE_RIGHTS = [
   { area: "Walk-in lab", SUPER_ADMIN: true, ADMIN: true, RECEPTION: true, DOCTOR: false, LAB: true, PHARMACY: false, CASHIER: false },
   { area: "Pharmacy dispense and OTC", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
   { area: "Pharmacy stock items and import", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
+  { area: "Stock take, LPO/GRN, inventory movements", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
   { area: "Issue LPO and receive GRN", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
   { area: "Stock take", SUPER_ADMIN: true, ADMIN: true, RECEPTION: false, DOCTOR: false, LAB: false, PHARMACY: true, CASHIER: false },
   { area: "Collect payment", SUPER_ADMIN: true, ADMIN: true, RECEPTION: true, DOCTOR: false, LAB: false, PHARMACY: false, CASHIER: true },
