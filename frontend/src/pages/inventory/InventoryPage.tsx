@@ -104,7 +104,7 @@ export function InventoryPage() {
           <div className="flex flex-wrap gap-2">
             <Button variant={tab === "levels" ? "primary" : "secondary"} onClick={() => setTab("levels")}>Stock</Button>
             <Button variant={tab === "items" ? "primary" : "secondary"} onClick={() => setTab("items")}>Catalogue</Button>
-            <Button variant={tab === "csv" ? "primary" : "secondary"} onClick={() => setTab("csv")}>CSV import</Button>
+            <Button variant={tab === "csv" ? "primary" : "secondary"} onClick={() => setTab("csv")}>Catalogue import</Button>
             <Button variant={tab === "take" ? "primary" : "secondary"} onClick={() => setTab("take")}>Stock take</Button>
             <Button variant={tab === "lpo" ? "primary" : "secondary"} onClick={() => setTab("lpo")}>LPOs</Button>
             <Button variant={tab === "receive" ? "primary" : "secondary"} onClick={() => setTab("receive")}>Goods receiving</Button>

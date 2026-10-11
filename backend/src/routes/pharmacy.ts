@@ -4,7 +4,13 @@ import { param } from "../lib/params.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 import { created, ok } from "../lib/response.js";
 import { z } from "zod";
-import { assertCatalogueWritesAllowed } from "../lib/catalogueWriteGuard.js";
+import { assertOpeningStockWritesAllowed } from "../lib/catalogueWriteGuard.js";
+import { badRequest } from "../lib/errors.js";
+import { suggestHeaderMapping } from "../lib/catalogueHeaders.js";
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readXlsxRowsFromFile } from "../lib/xlsxRows.js";
 import {
   createPrescription,
   dispensePrescription,
@@ -130,10 +136,12 @@ pharmacyRouter.post(
 
 pharmacyRouter.post(
   "/medicines/import",
-  authorize("ADMIN", "PHARMACY"),
+  authorize("ADMIN"),
   asyncHandler(async (req, res) => {
-    assertCatalogueWritesAllowed();
-    return created(res, await importMedicines(req.user!.tenantId, req.user!.id, importMedicinesSchema.parse(req.body)));
+    return created(
+      res,
+      await importMedicines(req.user!.tenantId, req.user!.id, req.user!.role, importMedicinesSchema.parse(req.body)),
+    );
   }),
 );
 
@@ -157,19 +165,45 @@ pharmacyRouter.post(
 );
 
 pharmacyRouter.post(
+  "/catalogue/parse-workbook",
+  authorize("ADMIN"),
+  asyncHandler(async (req, res) => {
+    const body = z.object({ xlsxBase64: z.string().min(20) }).parse(req.body);
+    const dir = mkdtempSync(join(tmpdir(), "clinicflow-xlsx-"));
+    const file = join(dir, "catalogue.xlsx");
+    try {
+      writeFileSync(file, Buffer.from(body.xlsxBase64, "base64"));
+      const raw = readXlsxRowsFromFile(file);
+      const headers = raw[0] ? Object.keys(raw[0]) : [];
+      return ok(res, {
+        headers,
+        rows: raw,
+        suggestedMapping: suggestHeaderMapping(headers),
+        parsedRows: parseCatalogueRows(raw),
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }),
+);
+
+pharmacyRouter.post(
   "/catalogue/import",
   authorize("ADMIN"),
   asyncHandler(async (req, res) => {
     const body = catalogueImportBody.parse(req.body);
     const dryRun = body.dryRun !== false;
-    if (!dryRun) assertCatalogueWritesAllowed();
     const mapping = body.mapping as HeaderMapping | undefined;
     const rows = body.csvText
       ? parseCatalogueCsv(body.csvText, mapping).rows
       : parseCatalogueRows(body.rows ?? [], mapping);
+    if (rows.length > 5000) {
+      throw badRequest("Catalogue import is limited to 5000 rows.");
+    }
     const report = await importPharmacyCatalogue({
       tenantId: req.user!.tenantId,
       actorId: req.user!.id,
+      actorRole: req.user!.role,
       rows,
       dryRun,
       sourceFilename: body.sourceFilename,
@@ -195,7 +229,7 @@ pharmacyRouter.post(
       })
       .parse(req.body);
     const dryRun = body.dryRun !== false;
-    if (!dryRun) assertCatalogueWritesAllowed();
+    if (!dryRun) assertOpeningStockWritesAllowed();
     const mapping = body.mapping as HeaderMapping | undefined;
     const rows = body.csvText
       ? parseCatalogueCsv(body.csvText, mapping).rows

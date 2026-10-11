@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma, type TxClient } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
 import { badRequest, forbidden, notFound } from "../lib/errors.js";
-import { assertCatalogueWritesAllowed } from "../lib/catalogueWriteGuard.js";
+import { assertCatalogueMasterDataImportAllowed } from "../lib/catalogueWriteGuard.js";
 import { nextTreatmentNumber } from "../lib/sequences.js";
 import { money } from "../lib/serialize.js";
 import { CLINIC_MEDICINES } from "../data/pharmacyCatalog.js";
@@ -567,12 +567,13 @@ export const importMedicinesSchema = z.object({
 export async function importMedicines(
   tenantId: string,
   actorId: string,
+  actorRole: string,
   input: z.infer<typeof importMedicinesSchema>,
 ) {
   if (input.receiveOpening) {
     throw badRequest("Catalogue import never posts stock. Use the opening-stock import after dry-run confirmation.");
   }
-  assertCatalogueWritesAllowed();
+  assertCatalogueMasterDataImportAllowed(actorRole);
   return prisma.$transaction(async (tx) => {
     let created = 0;
     let updated = 0;

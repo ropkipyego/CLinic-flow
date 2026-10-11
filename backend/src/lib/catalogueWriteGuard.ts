@@ -1,10 +1,21 @@
 import { env } from "../config/env.js";
-import { badRequest } from "./errors.js";
+import { badRequest, forbidden } from "./errors.js";
+import { isClinicAdmin } from "./roles.js";
 
 export const CATALOGUE_WRITE_BLOCKED_MESSAGE =
-  "Catalogue and opening-stock writes are blocked. Production never allows them. Non-production writes require CATALOGUE_IMPORT_WRITE=true after a dry-run review. Quantities in a catalogue file never change stock.";
+  "Catalogue master-data import requires a clinic administrator (ADMIN or SUPER_ADMIN) signed in through the application. Quantities in a catalogue file never change stock.";
 
-export function catalogueWritesBlocked(opts?: {
+export const OPENING_STOCK_WRITE_BLOCKED_MESSAGE =
+  "Opening-stock posting is blocked in production. Use Stock take to change shelf quantities. Non-production opening-stock writes require CATALOGUE_IMPORT_WRITE=true after a dry-run review.";
+
+/** Catalogue master data: role is the authorization. Env flags never enable this in place of an admin session. */
+export function assertCatalogueMasterDataImportAllowed(role: string): void {
+  if (!isClinicAdmin(role)) {
+    throw forbidden(CATALOGUE_WRITE_BLOCKED_MESSAGE);
+  }
+}
+
+export function openingStockWritesBlocked(opts?: {
   isProduction?: boolean;
   writeEnabled?: boolean;
   nodeEnv?: string;
@@ -17,8 +28,23 @@ export function catalogueWritesBlocked(opts?: {
   return !writeEnabled;
 }
 
-export function assertCatalogueWritesAllowed(): void {
-  if (catalogueWritesBlocked()) {
-    throw badRequest(CATALOGUE_WRITE_BLOCKED_MESSAGE);
+/** Opening stock / stock-changing imports. Production is always blocked. */
+export function assertOpeningStockWritesAllowed(): void {
+  if (openingStockWritesBlocked()) {
+    throw badRequest(OPENING_STOCK_WRITE_BLOCKED_MESSAGE);
   }
+}
+
+/** @deprecated Use assertCatalogueMasterDataImportAllowed or assertOpeningStockWritesAllowed. */
+export function catalogueWritesBlocked(opts?: {
+  isProduction?: boolean;
+  writeEnabled?: boolean;
+  nodeEnv?: string;
+}): boolean {
+  return openingStockWritesBlocked(opts);
+}
+
+/** @deprecated */
+export function assertCatalogueWritesAllowed(): void {
+  assertOpeningStockWritesAllowed();
 }

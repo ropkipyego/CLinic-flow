@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { writeAudit } from "../lib/audit.js";
 import { badRequest, conflict } from "../lib/errors.js";
 import { parseCsv } from "../lib/csv.js";
 import { isUniqueConstraintError } from "../lib/prismaErrors.js";
-import { assertCatalogueWritesAllowed } from "../lib/catalogueWriteGuard.js";
+import {
+  assertCatalogueMasterDataImportAllowed,
+  assertOpeningStockWritesAllowed,
+} from "../lib/catalogueWriteGuard.js";
 import {
   mappingNeedsReview,
   resolveHeaderMapping,
@@ -151,41 +155,77 @@ function skuFromName(name: string) {
 }
 
 export function sourceKey(name: string, aten: string) {
-  if (aten.trim()) return `aten:${aten.trim()}`;
-  return `name:${name.trim().toLowerCase()}`;
+  if (aten.trim()) return `aten:${aten.trim().toLowerCase()}`;
+  return `name:${normalizeMatch(name)}`;
+}
+
+export function normalizeMatch(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function identityKey(name: string, strength: string, form: string) {
+  return `${normalizeMatch(name)}|${normalizeMatch(strength)}|${normalizeMatch(form)}`;
 }
 
 function asRow(row: CatalogueSourceRow) {
   return row as CatalogueSourceRow & { _qtyError?: string; _costError?: string; _sellError?: string };
 }
 
-async function findMatches(tenantId: string, row: CatalogueSourceRow) {
+type MedicineMatch = { id: string; name: string; sku: string; strength: string | null; dosageForm: string | null };
+
+function findMatches(
+  row: CatalogueSourceRow,
+  bySku: Map<string, MedicineMatch[]>,
+  byIdentity: Map<string, MedicineMatch[]>,
+  byName: Map<string, MedicineMatch[]>,
+  bySourceKey: Map<string, MedicineMatch>,
+): { matches: MedicineMatch[]; reason: string } {
+  const mapped = bySourceKey.get(sourceKey(row.name, row.aten));
+  if (mapped) return { matches: [mapped], reason: "import map" };
   if (row.aten) {
-    const bySku = await prisma.medicine.findMany({
-      where: { tenantId, sku: { equals: row.aten, mode: "insensitive" } },
-    });
-    if (bySku.length) return bySku;
+    const skuHits = bySku.get(normalizeMatch(row.aten)) || [];
+    if (skuHits.length) return { matches: skuHits, reason: "sku" };
   }
-  return prisma.medicine.findMany({
-    where: { tenantId, name: { equals: row.name, mode: "insensitive" } },
-  });
+  if (row.name && (row.strength || row.dosageForm)) {
+    const ident = byIdentity.get(identityKey(row.name, row.strength, row.dosageForm)) || [];
+    if (ident.length) return { matches: ident, reason: "name+strength+form" };
+  }
+  if (row.name && !row.aten) {
+    const named = byName.get(normalizeMatch(row.name)) || [];
+    return { matches: named, reason: "name" };
+  }
+  return { matches: [], reason: "none" };
 }
 
 export async function previewCatalogueImport(opts: {
   tenantId: string;
   rows: CatalogueSourceRow[];
 }): Promise<CataloguePreviewRow[]> {
-  const atenCounts = new Map<string, number[]>();
-  const nameCounts = new Map<string, number[]>();
-  for (const row of opts.rows) {
-    if (row.aten) {
-      const k = row.aten.toLowerCase();
-      atenCounts.set(k, [...(atenCounts.get(k) || []), row.rowNumber]);
-    } else if (row.name) {
-      const k = row.name.toLowerCase();
-      nameCounts.set(k, [...(nameCounts.get(k) || []), row.rowNumber]);
-    }
+  const atenFirst = new Map<string, number>();
+  const nameFirst = new Map<string, number>();
+  const medicines = await prisma.medicine.findMany({
+    where: { tenantId: opts.tenantId },
+    select: { id: true, name: true, sku: true, strength: true, dosageForm: true },
+  });
+  const maps = await prisma.catalogueImportMap.findMany({ where: { tenantId: opts.tenantId } });
+  const bySku = new Map<string, MedicineMatch[]>();
+  const byIdentity = new Map<string, MedicineMatch[]>();
+  const byName = new Map<string, MedicineMatch[]>();
+  for (const m of medicines) {
+    const skuKey = normalizeMatch(m.sku);
+    bySku.set(skuKey, [...(bySku.get(skuKey) || []), m]);
+    const ident = identityKey(m.name, m.strength || "", m.dosageForm || "");
+    byIdentity.set(ident, [...(byIdentity.get(ident) || []), m]);
+    const nk = normalizeMatch(m.name);
+    byName.set(nk, [...(byName.get(nk) || []), m]);
   }
+  const medById = new Map(medicines.map((m) => [m.id, m]));
+  const bySourceKey = new Map<string, MedicineMatch>();
+  for (const map of maps) {
+    const med = medById.get(map.medicineId);
+    if (med) bySourceKey.set(map.sourceKey, med);
+  }
+
   const preview: CataloguePreviewRow[] = [];
 
   for (const row of opts.rows) {
@@ -193,47 +233,63 @@ export async function previewCatalogueImport(opts: {
     const errors: string[] = [];
     const warnings: string[] = [];
     if (!row.name) errors.push("Drug name is required.");
-    if (extra._qtyError) errors.push(extra._qtyError);
+    if (extra._qtyError) warnings.push(`${extra._qtyError} Quantity is ignored for catalogue import.`);
     if (extra._costError) errors.push(extra._costError);
     if (extra._sellError) errors.push(extra._sellError);
+
+    let duplicateOf: number | null = null;
     if (row.aten) {
-      const rows = atenCounts.get(row.aten.toLowerCase()) || [];
-      if (rows.length > 1) errors.push(`ATEN/SKU "${row.aten}" is duplicated in this file (rows ${rows.join(", ")}).`);
+      const k = row.aten.toLowerCase();
+      const first = atenFirst.get(k);
+      if (first == null) atenFirst.set(k, row.rowNumber);
+      else duplicateOf = first;
     } else if (row.name) {
-      const rows = nameCounts.get(row.name.toLowerCase()) || [];
-      if (rows.length > 1) errors.push(`Drug name "${row.name}" is duplicated in this file (rows ${rows.join(", ")}).`);
+      const k = normalizeMatch(row.name);
+      const first = nameFirst.get(k);
+      if (first == null) nameFirst.set(k, row.rowNumber);
+      else duplicateOf = first;
     }
 
-    const matches = row.name && !errors.length ? await findMatches(opts.tenantId, row) : [];
     let action: CataloguePreviewRow["action"] = "create";
     let matchMedicineId: string | null = null;
     let matchName: string | null = null;
-    if (errors.length) action = "reject";
-    else if (matches.length > 1) {
+    if (duplicateOf != null) {
+      action = "skip";
+      errors.push(
+        row.aten
+          ? `Duplicate ATEN/SKU "${row.aten}" in this file. Kept row ${duplicateOf}.`
+          : `Duplicate drug name "${row.name}" in this file. Kept row ${duplicateOf}.`,
+      );
+    } else if (errors.length) {
       action = "reject";
-      errors.push(`Matches ${matches.length} existing medicines; not merged.`);
-    } else if (matches.length === 1) {
-      action = "update";
-      matchMedicineId = matches[0]!.id;
-      matchName = matches[0]!.name;
+    } else {
+      const { matches } = findMatches(row, bySku, byIdentity, byName, bySourceKey);
+      if (matches.length > 1) {
+        action = "reject";
+        errors.push(`Matches ${matches.length} existing medicines; not merged.`);
+      } else if (matches.length === 1) {
+        action = "update";
+        matchMedicineId = matches[0]!.id;
+        matchName = matches[0]!.name;
+      }
     }
     if (row.sellingPrice === null && !extra._sellError) {
-      warnings.push("Selling price is blank. Cost will not be copied. Item will need a selling price before dispensing.");
+      warnings.push("Selling price is blank. Existing selling price is kept. Cost is not copied.");
     }
     if (row.sellingPrice === 0) {
       warnings.push("Selling price is 0 (distinct from blank). Cost is not used as a substitute.");
     }
-    if (row.quantity === 0) {
-      warnings.push("Quantity 0 is preserved as a catalogue value only. Stock is not changed by this import.");
-    }
-    if (row.quantity !== null && row.quantity > 0) {
+    if (row.quantity !== null && row.quantity !== 0) {
       warnings.push(`Quantity ${row.quantity} is shown for review only. Catalogue import never posts stock.`);
+    }
+    if (row.quantity === 0) {
+      warnings.push("Quantity 0 is catalogue-only. Stock is not changed by this import.");
     }
     preview.push({
       ...row,
       errors,
       warnings,
-      action: errors.length ? "reject" : action,
+      action,
       matchMedicineId,
       matchName,
     });
@@ -241,9 +297,23 @@ export async function previewCatalogueImport(opts: {
   return preview;
 }
 
+function catalogueUpdatePatch(row: CataloguePreviewRow): Prisma.MedicineUpdateInput {
+  const data: Prisma.MedicineUpdateInput = { active: true };
+  if (row.name) data.name = row.name;
+  if (row.genericName) data.genericName = row.genericName;
+  if (row.strength) data.strength = row.strength;
+  if (row.dosageForm) data.dosageForm = row.dosageForm;
+  if (row.unit) data.unit = row.unit;
+  if (row.category) data.category = row.category;
+  if (row.costPrice != null && Number.isFinite(row.costPrice)) data.costPrice = row.costPrice;
+  if (row.sellingPrice !== null && Number.isFinite(row.sellingPrice)) data.sellingPrice = row.sellingPrice;
+  return data;
+}
+
 export async function importPharmacyCatalogue(opts: {
   tenantId: string;
   actorId: string;
+  actorRole: string;
   rows: CatalogueSourceRow[];
   dryRun: boolean;
   sourceFilename?: string | null;
@@ -277,7 +347,7 @@ export async function importPharmacyCatalogue(opts: {
   };
 
   if (opts.dryRun) return report;
-  assertCatalogueWritesAllowed();
+  assertCatalogueMasterDataImportAllowed(opts.actorRole);
 
   const counts = await prisma.$transaction(async (tx) => {
     let created = 0;
@@ -285,32 +355,11 @@ export async function importPharmacyCatalogue(opts: {
     for (const row of preview) {
       if (row.action !== "create" && row.action !== "update") continue;
       const sku = row.aten || skuFromName(row.name);
-      const data = {
-        name: row.name,
-        genericName: row.genericName || null,
-        strength: row.strength || null,
-        dosageForm: row.dosageForm || null,
-        unit: row.unit || "unit",
-        sku,
-        category: row.category || row.description || null,
-        sellingPrice: row.sellingPrice,
-        costPrice: row.costPrice ?? 0,
-        active: true,
-      };
       const key = sourceKey(row.name, row.aten);
       if (row.matchMedicineId) {
         await tx.medicine.update({
           where: { id: row.matchMedicineId },
-          data: {
-            name: data.name,
-            genericName: data.genericName ?? undefined,
-            strength: data.strength ?? undefined,
-            dosageForm: data.dosageForm ?? undefined,
-            unit: data.unit,
-            category: data.category ?? undefined,
-            costPrice: data.costPrice,
-            ...(row.sellingPrice !== null ? { sellingPrice: row.sellingPrice } : {}),
-          },
+          data: catalogueUpdatePatch(row),
         });
         await tx.catalogueImportMap.upsert({
           where: { tenantId_sourceKey: { tenantId: opts.tenantId, sourceKey: key } },
@@ -323,7 +372,16 @@ export async function importPharmacyCatalogue(opts: {
       const createdMed = await tx.medicine.create({
         data: {
           tenantId: opts.tenantId,
-          ...data,
+          name: row.name,
+          genericName: row.genericName || null,
+          strength: row.strength || null,
+          dosageForm: row.dosageForm || null,
+          unit: row.unit || "unit",
+          sku,
+          category: row.category || row.description || null,
+          sellingPrice: row.sellingPrice != null && Number.isFinite(row.sellingPrice) ? row.sellingPrice : null,
+          costPrice: row.costPrice != null && Number.isFinite(row.costPrice) ? row.costPrice : 0,
+          active: true,
           quantityOnHand: 0,
         },
       });
@@ -431,7 +489,7 @@ export async function importOpeningStock(opts: {
   if (opts.dryRun) {
     return { dryRun: true, alreadyPosted: Boolean(prior), proposed, posted: 0 };
   }
-  assertCatalogueWritesAllowed();
+  assertOpeningStockWritesAllowed();
 
   const valid = proposed.filter((p) => !p.error && p.medicineId);
   if (!valid.length) {

@@ -28,7 +28,7 @@ export function createApp() {
       credentials: true,
     }),
   );
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({ limit: "8mb" }));
 
   const limiter = rateLimit({
     windowMs: env.rateLimitWindowMs,

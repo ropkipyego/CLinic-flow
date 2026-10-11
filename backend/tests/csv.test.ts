@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseCsv, parseCsvRecords } from "../src/lib/csv.js";
 import { databaseNameFromUrl, assertIsolatedTestDatabase } from "../src/lib/testDatabase.js";
-import { catalogueWritesBlocked } from "../src/lib/catalogueWriteGuard.js";
+import { openingStockWritesBlocked } from "../src/lib/catalogueWriteGuard.js";
 import { resolveHeaderMapping, suggestHeaderMapping } from "../src/lib/catalogueHeaders.js";
 import { parseCatalogueRows } from "../src/services/pharmacyCatalogueImport.js";
 
@@ -28,13 +28,13 @@ describe("CSV parser", () => {
   });
 });
 
-describe("catalogue write guard", () => {
+describe("opening-stock write guard", () => {
   it("blocks production even when CATALOGUE_IMPORT_WRITE is true", () => {
-    expect(catalogueWritesBlocked({ isProduction: true, writeEnabled: true, nodeEnv: "production" })).toBe(true);
-    expect(catalogueWritesBlocked({ isProduction: true, writeEnabled: false, nodeEnv: "production" })).toBe(true);
-    expect(catalogueWritesBlocked({ isProduction: false, writeEnabled: false, nodeEnv: "development" })).toBe(true);
-    expect(catalogueWritesBlocked({ isProduction: false, writeEnabled: true, nodeEnv: "development" })).toBe(false);
-    expect(catalogueWritesBlocked({ isProduction: false, writeEnabled: false, nodeEnv: "test" })).toBe(false);
+    expect(openingStockWritesBlocked({ isProduction: true, writeEnabled: true, nodeEnv: "production" })).toBe(true);
+    expect(openingStockWritesBlocked({ isProduction: true, writeEnabled: false, nodeEnv: "production" })).toBe(true);
+    expect(openingStockWritesBlocked({ isProduction: false, writeEnabled: false, nodeEnv: "development" })).toBe(true);
+    expect(openingStockWritesBlocked({ isProduction: false, writeEnabled: true, nodeEnv: "development" })).toBe(false);
+    expect(openingStockWritesBlocked({ isProduction: false, writeEnabled: false, nodeEnv: "test" })).toBe(false);
   });
 });
 
