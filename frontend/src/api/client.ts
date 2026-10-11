@@ -41,7 +41,9 @@ export async function api<T>(path: string, init: RequestInit & { skipQueue?: boo
   }
 
   const headers = new Headers(init.headers);
-  if (!headers.has("Content-Type") && body) headers.set("Content-Type", "application/json");
+  if (!headers.has("Content-Type") && body && !(body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
   const t = token();
   if (t) headers.set("Authorization", `Bearer ${t}`);
 
@@ -88,6 +90,7 @@ export async function api<T>(path: string, init: RequestInit & { skipQueue?: boo
 export const get = <T>(path: string) => api<T>(path);
 export const post = <T>(path: string, body?: unknown) =>
   api<T>(path, { method: "POST", body: body !== undefined ? JSON.stringify(withClientRequestId(path, body)) : undefined });
+export const postForm = <T>(path: string, body: FormData) => api<T>(path, { method: "POST", body, skipQueue: true });
 export const put = <T>(path: string, body?: unknown) =>
   api<T>(path, { method: "PUT", body: body !== undefined ? JSON.stringify(body) : undefined });
 export const patch = <T>(path: string, body?: unknown) =>

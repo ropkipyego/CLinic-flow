@@ -1,4 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const XLSX_PY = `
 import json, sys, zipfile, xml.etree.ElementTree as ET
@@ -50,4 +53,15 @@ with zipfile.ZipFile(path) as z:
 export function readXlsxRowsFromFile(file: string): Record<string, unknown>[] {
   const json = execFileSync("python3", ["-c", XLSX_PY, file], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
   return JSON.parse(json) as Record<string, unknown>[];
+}
+
+export function readXlsxRowsFromBuffer(buf: Buffer): Record<string, unknown>[] {
+  const dir = mkdtempSync(join(tmpdir(), "clinicflow-xlsx-"));
+  const file = join(dir, "catalogue.xlsx");
+  try {
+    writeFileSync(file, buf);
+    return readXlsxRowsFromFile(file);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

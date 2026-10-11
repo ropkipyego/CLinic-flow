@@ -4,6 +4,16 @@ import { AppError } from "../lib/errors.js";
 import { fail } from "../lib/response.js";
 
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
+  const code = err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
+  const type = err && typeof err === "object" && "type" in err ? String((err as { type: unknown }).type) : "";
+  if (code === "LIMIT_FILE_SIZE" || type === "entity.too.large") {
+    return fail(
+      res,
+      413,
+      "PAYLOAD_TOO_LARGE",
+      "That catalogue file is too large to send as form text. Upload the Excel/CSV file instead (up to 20 MB).",
+    );
+  }
   if (err instanceof ZodError) {
     const message = err.issues[0]?.message || "Validation failed.";
     return fail(res, 400, "VALIDATION_ERROR", message, err.issues);

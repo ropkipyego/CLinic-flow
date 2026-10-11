@@ -15,6 +15,7 @@ import {
   suggestHeaderMapping,
   type HeaderMapping,
 } from "../lib/catalogueHeaders.js";
+import { readXlsxRowsFromBuffer } from "../lib/xlsxRows.js";
 import { moveStock } from "./pharmacyService.js";
 
 export {
@@ -68,9 +69,25 @@ export type CatalogueImportReport = {
   stockChangesProposed: 0;
   issues: Array<{ row: number; item: string; code: string; detail: string }>;
   preview: CataloguePreviewRow[];
+  previewTruncated: boolean;
   dryRun: boolean;
   sourceFilename: string | null;
 };
+
+const RESPONSE_EXCEPTION_LIMIT = 400;
+const RESPONSE_SAMPLE_LIMIT = 40;
+
+export function serializeCatalogueReport(report: CatalogueImportReport): CatalogueImportReport {
+  const exceptions = report.preview.filter((p) => p.action === "reject" || p.action === "skip");
+  const sample = report.preview.filter((p) => p.action === "create" || p.action === "update").slice(0, RESPONSE_SAMPLE_LIMIT);
+  const preview = [...exceptions.slice(0, RESPONSE_EXCEPTION_LIMIT), ...sample];
+  return {
+    ...report,
+    preview,
+    previewTruncated: report.preview.length > preview.length,
+    issues: report.issues.filter((i) => i.code === "VALIDATION").slice(0, RESPONSE_EXCEPTION_LIMIT),
+  };
+}
 
 function parseMoney(raw: string): { value: number | null; error?: string; blank: boolean } {
   const trimmed = raw.trim();
@@ -132,6 +149,15 @@ export function parseCatalogueRows(
       _sellError: sell.error,
     } as CatalogueSourceRow & { _qtyError?: string; _costError?: string; _sellError?: string };
   });
+}
+
+export function parseCatalogueUpload(buffer: Buffer, filename: string, mapping?: HeaderMapping) {
+  const name = (filename || "").toLowerCase();
+  if (name.endsWith(".xlsx")) {
+    return parseCatalogueRows(readXlsxRowsFromBuffer(buffer), mapping);
+  }
+  const text = buffer.toString("utf8").replace(/^\uFEFF/, "");
+  return parseCatalogueCsv(text, mapping).rows;
 }
 
 export function parseCatalogueCsv(text: string, mapping?: HeaderMapping) {
@@ -273,18 +299,6 @@ export async function previewCatalogueImport(opts: {
         matchName = matches[0]!.name;
       }
     }
-    if (row.sellingPrice === null && !extra._sellError) {
-      warnings.push("Selling price is blank. Existing selling price is kept. Cost is not copied.");
-    }
-    if (row.sellingPrice === 0) {
-      warnings.push("Selling price is 0 (distinct from blank). Cost is not used as a substitute.");
-    }
-    if (row.quantity !== null && row.quantity !== 0) {
-      warnings.push(`Quantity ${row.quantity} is shown for review only. Catalogue import never posts stock.`);
-    }
-    if (row.quantity === 0) {
-      warnings.push("Quantity 0 is catalogue-only. Stock is not changed by this import.");
-    }
     preview.push({
       ...row,
       errors,
@@ -334,14 +348,15 @@ export async function importPharmacyCatalogue(opts: {
     zeroQuantity: preview.filter((p) => p.quantity === 0).length,
     stockChangesProposed: 0,
     issues: preview.flatMap((p) =>
-      [...p.errors, ...p.warnings].map((detail) => ({
+      p.errors.map((detail) => ({
         row: p.rowNumber,
         item: p.name,
-        code: p.errors.length ? "VALIDATION" : "WARNING",
+        code: "VALIDATION",
         detail,
       })),
     ),
     preview,
+    previewTruncated: false,
     dryRun: opts.dryRun,
     sourceFilename: opts.sourceFilename ?? null,
   };
@@ -349,7 +364,8 @@ export async function importPharmacyCatalogue(opts: {
   if (opts.dryRun) return report;
   assertCatalogueMasterDataImportAllowed(opts.actorRole);
 
-  const counts = await prisma.$transaction(async (tx) => {
+  const counts = await prisma.$transaction(
+    async (tx) => {
     let created = 0;
     let updated = 0;
     for (const row of preview) {
@@ -431,7 +447,9 @@ export async function importPharmacyCatalogue(opts: {
       tx,
     );
     return { created, updated };
-  });
+    },
+    { timeout: 180_000, maxWait: 20_000 },
+  );
 
   report.created = counts.created;
   report.updated = counts.updated;

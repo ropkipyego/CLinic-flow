@@ -1,18 +1,16 @@
-import { FormEvent, useMemo, useState } from "react";
-import { post } from "../../api/client";
+import { FormEvent, useState } from "react";
+import { postForm } from "../../api/client";
 import { Button, Empty, Field, Table, inputClass } from "../../components/ui";
 import { useToast } from "../../components/ToastProvider";
-import { DEFAULT_CSV_TEMPLATE, OPTIONAL_CSV_TEMPLATE, parseCsv, sha256Hex } from "../../lib/csv";
+import { DEFAULT_CSV_TEMPLATE, OPTIONAL_CSV_TEMPLATE } from "../../lib/csv";
 import { resolveHeaderMapping } from "../../lib/catalogueHeaders";
 
 type PreviewRow = {
   rowNumber: number;
   name: string;
-  quantity: number | null;
   aten: string;
   costPrice: number | null;
   sellingPrice: number | null;
-  unit: string;
   errors: string[];
   warnings: string[];
   action: string;
@@ -23,13 +21,13 @@ type Report = {
   sourceRows: number;
   created: number;
   updated: number;
-  matched: number;
   skipped: number;
   rejected: number;
   missingSellingPrice: number;
   stockChangesProposed: number;
   dryRun: boolean;
   preview: PreviewRow[];
+  previewTruncated?: boolean;
 };
 
 const FIELDS = [
@@ -58,87 +56,67 @@ function csvEscape(value: string) {
   return value;
 }
 
-function rowsToCsv(headers: string[], rows: Record<string, string>[]) {
-  return [
-    headers.map(csvEscape).join(","),
-    ...rows.map((row) => headers.map((h) => csvEscape(row[h] || "")).join(",")),
-  ].join("\n");
-}
-
-function fileToBase64(file: File) {
-  return file.arrayBuffer().then((buf) => {
-    const bytes = new Uint8Array(buf);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    }
-    return btoa(binary);
-  });
-}
-
 export function CatalogueImportPanel({ onSaved }: { onSaved?: () => Promise<void> }) {
   const toast = useToast();
-  const [text, setText] = useState(DEFAULT_CSV_TEMPLATE);
-  const [filename, setFilename] = useState("clinicflow-drugs.csv");
-  const [headers, setHeaders] = useState<string[]>(["name", "quantity", "aten", "costPrice"]);
-  const [mapping, setMapping] = useState<Record<string, string>>({
-    name: "name",
-    quantity: "quantity",
-    aten: "aten",
-    costPrice: "costPrice",
-  });
-  const [edited, setEdited] = useState<Record<string, string>[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [filename, setFilename] = useState("");
+  const [rowCount, setRowCount] = useState(0);
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [sampleRows, setSampleRows] = useState<Record<string, string>[]>([]);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const parsedRows = useMemo(() => parseCsv(text).rows, [text]);
-
-  function applyRows(name: string, nextHeaders: string[], rows: Record<string, string>[]) {
-    setFilename(name);
-    setHeaders(nextHeaders);
-    setEdited(rows);
-    setText(rowsToCsv(nextHeaders, rows));
-    setReport(null);
-    setMapping(resolveHeaderMapping(nextHeaders) as Record<string, string>);
-  }
-
-  async function onUpload(file: File) {
+  async function onUpload(next: File) {
     try {
       setBusy(true);
-      const isXlsx = /\.xlsx$/i.test(file.name) || file.type.includes("spreadsheet");
-      if (isXlsx) {
-        const parsed = await post<{ headers: string[]; rows: Record<string, string>[] }>("/pharmacy/catalogue/parse-workbook", {
-          xlsxBase64: await fileToBase64(file),
-        });
-        applyRows(file.name, parsed.headers, parsed.rows.map((r) => {
+      setReport(null);
+      const form = new FormData();
+      form.append("file", next);
+      const parsed = await postForm<{
+        headers: string[];
+        rowCount: number;
+        sampleRows: Record<string, unknown>[];
+        suggestedMapping: Record<string, string>;
+      }>("/pharmacy/catalogue/parse-workbook", form);
+      setFile(next);
+      setFilename(next.name);
+      setRowCount(parsed.rowCount);
+      setHeaders(parsed.headers);
+      setSampleRows(
+        (parsed.sampleRows || []).map((r) => {
           const rec: Record<string, string> = {};
           for (const [k, v] of Object.entries(r)) rec[k] = v == null ? "" : String(v);
           return rec;
-        }));
-        toast.push(`Loaded ${parsed.rows.length} workbook rows. Preview a dry-run before importing.`, "info");
-        return;
-      }
-      applyRows(file.name, parseCsv(await file.text()).headers, parseCsv(await file.text()).rows);
+        }),
+      );
+      setMapping((parsed.suggestedMapping as Record<string, string>) || (resolveHeaderMapping(parsed.headers) as Record<string, string>));
+      toast.push(`Mapped ${parsed.rowCount} workbook rows onto the medicine catalogue. Preview a dry-run before importing.`, "info");
     } catch (err) {
-      toast.push(err instanceof Error ? err.message : "Unable to read that file. Export as CSV if Excel fails.", "error");
+      toast.push(err instanceof Error ? err.message : "Unable to read that file.", "error");
     } finally {
       setBusy(false);
     }
+  }
+
+  function formPayload(dryRun: boolean) {
+    if (!file) throw new Error("Upload the Excel or CSV file first.");
+    const form = new FormData();
+    form.append("file", file);
+    form.append("mapping", JSON.stringify(mapping));
+    form.append("dryRun", dryRun ? "true" : "false");
+    form.append("sourceFilename", filename);
+    return form;
   }
 
   async function dryRun(e: FormEvent) {
     e.preventDefault();
     try {
       setBusy(true);
-      const result = await post<Report>("/pharmacy/catalogue/import", {
-        csvText: text,
-        mapping,
-        dryRun: true,
-        sourceFilename: filename,
-      });
+      const result = await postForm<Report>("/pharmacy/catalogue/import", formPayload(true));
       setReport(result);
       toast.push(
-        `Dry-run: ${result.sourceRows} rows · ${result.created} new · ${result.updated} matched · ${result.skipped} skipped · ${result.rejected} rejected. Stock changes: ${result.stockChangesProposed}.`,
+        `Dry-run: ${result.sourceRows} rows will map to ${result.created} new and ${result.updated} existing catalogue items. Stock changes: ${result.stockChangesProposed}.`,
         result.rejected ? "warning" : "info",
       );
     } catch (err) {
@@ -152,22 +130,16 @@ export function CatalogueImportPanel({ onSaved }: { onSaved?: () => Promise<void
     if (!report) return;
     if (
       !window.confirm(
-        `Import catalogue master data only?\n\n${report.created} new medicines will be added and ${report.updated} existing medicines will be updated.\nShelf quantities, stock movements, and stock-take history will not change.`,
+        `Write this list into the medicine catalogue?\n\n${report.created} new items · ${report.updated} updates.\nStock quantities will not change.`,
       )
     ) {
       return;
     }
     try {
       setBusy(true);
-      const result = await post<Report>("/pharmacy/catalogue/import", {
-        csvText: text,
-        mapping,
-        dryRun: false,
-        sourceFilename: filename,
-        sourceHash: await sha256Hex(text),
-      });
+      const result = await postForm<Report>("/pharmacy/catalogue/import", formPayload(false));
       setReport(result);
-      toast.push(`Imported ${result.created} new and ${result.updated} updated. Stock quantities were not changed.`, "success");
+      toast.push(`Catalogue updated: ${result.created} added, ${result.updated} matched. Stock was not changed.`, "success");
       await onSaved?.();
     } catch (err) {
       toast.push(err instanceof Error ? err.message : "Import write failed.", "error");
@@ -191,9 +163,9 @@ export function CatalogueImportPanel({ onSaved }: { onSaved?: () => Promise<void
   return (
     <form onSubmit={(e) => void dryRun(e)} className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
-        <h2 className="text-sm font-semibold">1. Upload medicine catalogue</h2>
+        <h2 className="text-sm font-semibold">Map workbook → medicine catalogue</h2>
         <p className="text-sm text-slate-500">
-          Import names, codes, and prices only. Workbook quantities are never posted to stock. Matching uses ATEN/SKU/barcode, then name + strength + form. Selling price is never copied from cost. Blank cells do not erase existing values.
+          Upload the Excel/CSV once. Columns are mapped to the existing Medicine master (name, SKU/ATEN, cost, optional selling price). Quantities in the file are ignored. The file is sent as a file upload, not pasted as thousands of JSON rows.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => download("clinicflow-drugs.csv", DEFAULT_CSV_TEMPLATE)}>CSV template</Button>
@@ -208,27 +180,33 @@ export function CatalogueImportPanel({ onSaved }: { onSaved?: () => Promise<void
             />
           </label>
         </div>
-        <Field label="CSV (editable after upload)">
-          <textarea className={`${inputClass} min-h-[140px] font-mono text-xs`} value={text} onChange={(e) => { setText(e.target.value); setEdited(parseCsv(e.target.value).rows); setHeaders(parseCsv(e.target.value).headers); }} />
-        </Field>
-        <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
-          {FIELDS.map(([field, label]) => (
-            <Field key={field} label={label}>
-              <select className={inputClass} value={mapping[field] || ""} onChange={(e) => setMapping((s) => ({ ...s, [field]: e.target.value }))}>
-                <option value="">Not mapped</option>
-                {headers.map((h) => <option key={h} value={h}>{h}</option>)}
-              </select>
-            </Field>
-          ))}
-        </div>
-        <Button type="submit" disabled={busy}>{busy ? "Working…" : "2. Preview dry-run"}</Button>
+        {file ? (
+          <p className="text-sm text-slate-700">
+            {filename} · {rowCount} rows ready to map
+          </p>
+        ) : null}
+        {headers.length ? (
+          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
+            {FIELDS.map(([field, label]) => (
+              <Field key={field} label={label}>
+                <select className={inputClass} value={mapping[field] || ""} onChange={(e) => setMapping((s) => ({ ...s, [field]: e.target.value }))}>
+                  <option value="">Not mapped</option>
+                  {headers.map((h) => (
+                    <option key={h} value={h}>{h}</option>
+                  ))}
+                </select>
+              </Field>
+            ))}
+          </div>
+        ) : null}
+        <Button type="submit" disabled={busy || !file}>{busy ? "Working…" : "Preview dry-run"}</Button>
       </div>
 
-      {edited.length ? (
+      {sampleRows.length ? (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold">{edited.length} rows loaded{parsedRows.length > 40 ? " (first 40 shown)" : ""}</h3>
-          <Table headers={["Row", ...headers.slice(0, 8)]}>
-            {edited.slice(0, 40).map((row, i) => (
+          <h3 className="text-sm font-semibold">Column sample (not the full {rowCount} rows)</h3>
+          <Table headers={["#", ...headers.slice(0, 8)]}>
+            {sampleRows.map((row, i) => (
               <tr key={i}>
                 <td className="px-3 py-2 text-xs">{i + 2}</td>
                 {headers.slice(0, 8).map((h) => (
@@ -238,11 +216,13 @@ export function CatalogueImportPanel({ onSaved }: { onSaved?: () => Promise<void
             ))}
           </Table>
         </div>
-      ) : <Empty title="No catalogue rows yet." body="Upload the Excel/CSV list, then preview." />}
+      ) : (
+        <Empty title="No catalogue file yet." body="Upload the Excel list. ClinicFlow maps it onto the medicine table without loading every cell into the browser." />
+      )}
 
       {report ? (
         <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-semibold">{report.dryRun ? "3. Confirm catalogue-only import" : "Import result"}</h2>
+          <h2 className="text-sm font-semibold">{report.dryRun ? "Confirm catalogue mapping" : "Import result"}</h2>
           <p className="text-sm">
             {report.dryRun ? "Dry-run" : "Committed"} · {report.sourceRows} rows · {report.created} create · {report.updated} update · {report.skipped} skip · {report.rejected} reject · missing selling price {report.missingSellingPrice} · stock changes {report.stockChangesProposed}.
           </p>
@@ -250,10 +230,10 @@ export function CatalogueImportPanel({ onSaved }: { onSaved?: () => Promise<void
             {report.preview.some((row) => row.action === "reject" || row.action === "skip") ? (
               <Button variant="secondary" onClick={downloadRejected}>Download rejected / skipped rows</Button>
             ) : null}
-            {report.dryRun ? <Button onClick={() => void commit()} disabled={busy}>Confirm catalogue import (no stock)</Button> : null}
+            {report.dryRun ? <Button onClick={() => void commit()} disabled={busy}>Write to medicine catalogue (no stock)</Button> : null}
           </div>
           <Table headers={["Row", "Name", "ATEN", "Cost", "Selling", "Match", "Action", "Messages"]}>
-            {report.preview.slice(0, 120).map((row) => (
+            {report.preview.map((row) => (
               <tr key={row.rowNumber} className={row.action === "reject" ? "bg-red-50" : row.action === "skip" ? "bg-amber-50" : undefined}>
                 <td className="px-3 py-2">{row.rowNumber}</td>
                 <td className="px-3 py-2">{row.name || "—"}</td>
@@ -266,10 +246,9 @@ export function CatalogueImportPanel({ onSaved }: { onSaved?: () => Promise<void
               </tr>
             ))}
           </Table>
-          {report.preview.length > 120 ? <p className="text-xs text-slate-500">{report.preview.length} preview rows; first 120 shown. Download rejected rows for the rest.</p> : null}
+          {report.previewTruncated ? <p className="text-xs text-slate-500">Showing exceptions plus a sample of matched rows. Counts above are for the full file.</p> : null}
         </div>
       ) : null}
-      <p className="text-sm text-slate-500">Stock quantities are changed only under Stock take or Goods receiving — not by this catalogue import.</p>
     </form>
   );
 }

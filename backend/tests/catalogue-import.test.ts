@@ -51,6 +51,7 @@ describe("pharmacy catalogue import", () => {
 
     const dry = await importPharmacyCatalogue({ tenantId, actorId, actorRole: "ADMIN", rows, dryRun: true });
     expect(dry.created).toBe(2);
+    expect(dry.issues.filter((i) => /quantity/i.test(i.detail)).length).toBe(0);
     expect(dry.missingSellingPrice).toBe(1);
     expect(dry.stockChangesProposed).toBe(0);
     expect(await prisma.medicine.count({ where: { tenantId } })).toBe(0);

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { param } from "../lib/params.js";
 import { authenticate, authorize } from "../middleware/auth.js";
@@ -7,10 +7,10 @@ import { z } from "zod";
 import { assertOpeningStockWritesAllowed } from "../lib/catalogueWriteGuard.js";
 import { badRequest } from "../lib/errors.js";
 import { suggestHeaderMapping } from "../lib/catalogueHeaders.js";
-import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { readXlsxRowsFromFile } from "../lib/xlsxRows.js";
+import { createHash } from "node:crypto";
+import multer from "multer";
+import { readXlsxRowsFromBuffer } from "../lib/xlsxRows.js";
+import { parseCsv } from "../lib/csv.js";
 import {
   createPrescription,
   dispensePrescription,
@@ -36,8 +36,23 @@ import {
   importPharmacyCatalogue,
   parseCatalogueCsv,
   parseCatalogueRows,
+  parseCatalogueUpload,
+  serializeCatalogueReport,
   type HeaderMapping,
 } from "../services/pharmacyCatalogueImport.js";
+
+const catalogueUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
+});
+
+function optionalCatalogueFile(req: Request, res: Response, next: NextFunction) {
+  const type = req.headers["content-type"] || "";
+  if (type.includes("multipart/form-data")) {
+    return catalogueUpload.single("file")(req, res, next);
+  }
+  next();
+}
 
 export const pharmacyRouter = Router();
 pharmacyRouter.use(authenticate);
@@ -167,38 +182,51 @@ pharmacyRouter.post(
 pharmacyRouter.post(
   "/catalogue/parse-workbook",
   authorize("ADMIN"),
+  optionalCatalogueFile,
   asyncHandler(async (req, res) => {
-    const body = z.object({ xlsxBase64: z.string().min(20) }).parse(req.body);
-    const dir = mkdtempSync(join(tmpdir(), "clinicflow-xlsx-"));
-    const file = join(dir, "catalogue.xlsx");
-    try {
-      writeFileSync(file, Buffer.from(body.xlsxBase64, "base64"));
-      const raw = readXlsxRowsFromFile(file);
-      const headers = raw[0] ? Object.keys(raw[0]) : [];
-      return ok(res, {
-        headers,
-        rows: raw,
-        suggestedMapping: suggestHeaderMapping(headers),
-        parsedRows: parseCatalogueRows(raw),
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const file = req.file;
+    if (!file?.buffer?.length) throw badRequest("Upload a CSV or Excel (.xlsx) catalogue file.");
+    const filename = file.originalname || "catalogue.xlsx";
+    const raw = filename.toLowerCase().endsWith(".xlsx")
+      ? readXlsxRowsFromBuffer(file.buffer)
+      : parseCsv(file.buffer.toString("utf8").replace(/^\uFEFF/, "")).rows;
+    const headers = raw[0] ? Object.keys(raw[0]).filter(Boolean) : [];
+    return ok(res, {
+      headers,
+      rowCount: raw.length,
+      sampleRows: raw.slice(0, 8),
+      suggestedMapping: suggestHeaderMapping(headers),
+    });
   }),
 );
 
 pharmacyRouter.post(
   "/catalogue/import",
   authorize("ADMIN"),
+  optionalCatalogueFile,
   asyncHandler(async (req, res) => {
-    const body = catalogueImportBody.parse(req.body);
-    const dryRun = body.dryRun !== false;
-    const mapping = body.mapping as HeaderMapping | undefined;
-    const rows = body.csvText
-      ? parseCatalogueCsv(body.csvText, mapping).rows
-      : parseCatalogueRows(body.rows ?? [], mapping);
-    if (rows.length > 5000) {
-      throw badRequest("Catalogue import is limited to 5000 rows.");
+    const file = req.file;
+    const mappingRaw = typeof req.body?.mapping === "string" ? JSON.parse(req.body.mapping) : req.body?.mapping;
+    const mapping = mappingRaw as HeaderMapping | undefined;
+    const dryRun =
+      req.body?.dryRun === false || req.body?.dryRun === "false" ? false : true;
+    let rows;
+    let sourceFilename = typeof req.body?.sourceFilename === "string" ? req.body.sourceFilename : null;
+    let sourceHash = typeof req.body?.sourceHash === "string" ? req.body.sourceHash : null;
+    if (file?.buffer?.length) {
+      sourceFilename = sourceFilename || file.originalname;
+      sourceHash = sourceHash || createHash("sha256").update(file.buffer).digest("hex");
+      rows = parseCatalogueUpload(file.buffer, file.originalname || "catalogue.csv", mapping);
+    } else {
+      const body = catalogueImportBody.parse(req.body);
+      rows = body.csvText
+        ? parseCatalogueCsv(body.csvText, mapping).rows
+        : parseCatalogueRows(body.rows ?? [], mapping);
+      sourceFilename = body.sourceFilename ?? sourceFilename;
+      sourceHash = body.sourceHash ?? sourceHash;
+    }
+    if (rows.length > 8000) {
+      throw badRequest("Catalogue import is limited to 8000 rows.");
     }
     const report = await importPharmacyCatalogue({
       tenantId: req.user!.tenantId,
@@ -206,10 +234,10 @@ pharmacyRouter.post(
       actorRole: req.user!.role,
       rows,
       dryRun,
-      sourceFilename: body.sourceFilename,
-      sourceHash: body.sourceHash,
+      sourceFilename,
+      sourceHash,
     });
-    return ok(res, report);
+    return ok(res, serializeCatalogueReport(report));
   }),
 );
 
